@@ -1,0 +1,22 @@
+# Local Postgres for development (optional — the backend defaults to sqlite).
+# Usage: docker compose up -d
+#        export DATABASE_URL=postgresql+psycopg2://portal:portal@localhost:5432/portal
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: portal
+      POSTGRES_PASSWORD: portal
+      POSTGRES_DB: portal
+    ports:
+      - "5432:5432"
+    volumes:
+      - portal_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U portal"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  portal_pgdata:

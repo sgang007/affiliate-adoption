@@ -1,0 +1,13 @@
+{
+  "IsEncrypted": false,
+  "Values": {
+    "AzureWebJobsStorage": "UseDevelopmentStorage=true",
+    "FUNCTIONS_WORKER_RUNTIME": "python",
+    "DATABASE_URL": "postgresql+psycopg2://portal:portal@localhost:5432/portal",
+    "JWT_SECRET": "replace-with-a-long-random-string",
+    "PORTAL_BASE_URL": "http://localhost:7071",
+    "FRONTEND_URL": "http://localhost:5173",
+    "ADMIN_EMAIL": "admin@portal.local",
+    "ADMIN_PASSWORD": "admin123"
+  }
+}

@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+*.db
+.pytest_cache/
+
+# Azure Functions
+local.settings.json
+.python_packages/
+
+# Node
+node_modules/
+dist/
+
+# Env & editor
+.env
+.DS_Store
+.vscode/
+.idea/

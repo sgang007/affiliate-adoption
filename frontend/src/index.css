@@ -1,0 +1,44 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  @apply bg-ink text-snow font-body antialiased;
+  background-image: radial-gradient(1200px 600px at 80% -10%, rgba(45, 212, 191, 0.07), transparent),
+    radial-gradient(900px 500px at -10% 110%, rgba(244, 183, 64, 0.05), transparent);
+  background-attachment: fixed;
+}
+
+.card {
+  @apply bg-panel border border-edge rounded-2xl;
+}
+
+.btn {
+  @apply inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2 font-display font-semibold
+    transition-colors duration-150 disabled:opacity-50 disabled:cursor-not-allowed;
+}
+.btn-primary {
+  @apply btn bg-mint text-ink hover:bg-teal-300;
+}
+.btn-ghost {
+  @apply btn border border-edge text-snow hover:border-mint/60 hover:text-mint;
+}
+
+.input {
+  @apply w-full rounded-xl bg-ink border border-edge px-4 py-2.5 text-snow placeholder-fog/60
+    focus:outline-none focus:border-mint/70 transition-colors duration-150;
+}
+
+.label {
+  @apply block text-xs font-semibold uppercase tracking-wider text-fog mb-1.5;
+}
+
+@keyframes rise {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.rise { animation: rise 240ms ease-out both; }
+
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb { background: #232c4e; border-radius: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
