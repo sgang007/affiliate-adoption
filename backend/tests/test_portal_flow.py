@@ -49,7 +49,7 @@ def test_full_flow(client, admin_token):
     # subscribed 20% of params.subscription.
     r = client.put(
         f"/api/admin/products/{product['id']}/rules",
-        json={"event": "signed_up", "type": "flat", "value": 300},
+        json={"rules": [{"event": "signed_up", "type": "flat", "value": 300}]},
         headers=auth(admin_token),
     )
     assert r.status_code == 200, r.text

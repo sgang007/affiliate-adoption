@@ -194,21 +194,24 @@ function RulesEditor({ product, onChange }: { product: any; onChange: () => void
       d[ev] = byEvent[ev] ?? { event: ev, type: 'flat', value: 0, field: '' }
     return d
   })
-  const [saved, setSaved] = useState('')
+  const [saved, setSaved] = useState(false)
   const [error, setError] = useState('')
 
-  async function save(ev: string) {
+  async function saveAll() {
     setError('')
-    setSaved('')
-    const d = drafts[ev]
     try {
       await api.put(`/api/admin/products/${product.id}/rules`, {
-        event: ev,
-        type: d.type,
-        value: +d.value,
-        field: d.type === 'commission' ? d.field || 'params.subscription' : null,
+        rules: EVENTS.map((ev) => {
+          const d = drafts[ev]
+          return {
+            event: ev,
+            type: d.type,
+            value: +d.value,
+            field: d.type === 'commission' ? d.field || 'params.subscription' : null,
+          }
+        }),
       })
-      setSaved(ev)
+      setSaved(true)
       onChange()
     } catch (e: any) {
       setError(e.message)
@@ -217,47 +220,61 @@ function RulesEditor({ product, onChange }: { product: any; onChange: () => void
 
   function set(ev: string, patch: any) {
     setDrafts({ ...drafts, [ev]: { ...drafts[ev], ...patch } })
+    setSaved(false)
   }
 
   return (
-    <div className="mt-5 space-y-3 border-t border-edge pt-5">
-      <p className="text-sm text-fog">
+    <div className="mt-5 space-y-2 border-t border-edge pt-5">
+      <p className="mb-3 text-sm text-fog">
         What the network earns per event. <b className="text-snow">Flat</b> pays a fixed amount;{' '}
         <b className="text-snow">commission</b> pays a % of a field from the event message (e.g.{' '}
         <code className="font-mono text-mint">params.subscription</code>). Subscribed pays once per
         user per month — recurring while the product keeps sending it.
       </p>
-      {error && <ErrorNote message={error} />}
+      <div className="grid grid-cols-[5.5rem_7rem_5rem_minmax(5rem,1fr)] items-center gap-x-2 px-3 text-xs font-semibold uppercase tracking-wider text-fog">
+        <span>Event</span>
+        <span>Type</span>
+        <span className="text-right">Value</span>
+        <span>% field</span>
+      </div>
       {EVENTS.map((ev) => {
         const d = drafts[ev]
         return (
-          <div key={ev} className="flex flex-wrap items-center gap-3 rounded-xl border border-edge p-3">
-            <div className="w-28"><Chip status={ev} /></div>
-            <select className="input w-36 py-1.5" value={d.type} onChange={(e) => set(ev, { type: e.target.value })}>
+          <div
+            key={ev}
+            className="grid grid-cols-[5.5rem_7rem_5rem_minmax(5rem,1fr)] items-center gap-x-2 rounded-xl border border-edge p-3"
+          >
+            <Chip status={ev} />
+            <select className="input py-1.5" value={d.type} onChange={(e) => set(ev, { type: e.target.value })}>
               <option value="flat">Flat ₹</option>
-              <option value="commission">Commission %</option>
+              <option value="commission">% of field</option>
             </select>
             <input
-              className="input w-28 py-1.5 text-right"
+              className="input py-1.5 text-right"
               type="number"
               step="0.01"
               value={d.value}
               onChange={(e) => set(ev, { value: e.target.value })}
             />
-            {d.type === 'commission' && (
+            {d.type === 'commission' ? (
               <input
-                className="input flex-1 min-w-40 py-1.5 font-mono text-xs"
+                className="input py-1.5 font-mono text-xs"
                 placeholder="params.subscription"
                 value={d.field ?? ''}
                 onChange={(e) => set(ev, { field: e.target.value })}
               />
+            ) : (
+              <span className="px-1 text-sm text-fog/50">—</span>
             )}
-            <button className="btn-ghost ml-auto px-3 py-1.5 text-xs" onClick={() => save(ev)}>
-              {saved === ev ? 'Saved ✓' : 'Save'}
-            </button>
           </div>
         )
       })}
+      {error && <ErrorNote message={error} />}
+      <div className="pt-2">
+        <button className="btn-primary px-5 py-2 text-sm" onClick={saveAll}>
+          {saved ? 'All rules saved ✓' : 'Save all rules'}
+        </button>
+      </div>
     </div>
   )
 }

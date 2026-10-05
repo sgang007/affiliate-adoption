@@ -17,7 +17,7 @@ from ..models import (
     User,
     gen_secret,
 )
-from ..schemas import AssignIn, ProductIn, ProductUpdate, RuleIn, UserCreateIn
+from ..schemas import AssignIn, ProductIn, ProductUpdate, RulesIn, UserCreateIn
 from ..security import hash_password
 from ..services.emailer import send_payout_processed
 from ..services.identity import assign_affiliate_id
@@ -108,24 +108,27 @@ def update_product(product_id: int, body: ProductUpdate, db: Session = Depends(g
 
 
 @router.put("/products/{product_id}/rules")
-def upsert_rule(product_id: int, body: RuleIn, db: Session = Depends(get_db)):
+def upsert_rules(product_id: int, body: RulesIn, db: Session = Depends(get_db)):
+    """Save the product's incentive rules in one atomic call."""
     product = db.get(Product, product_id)
     if not product:
         raise HTTPException(404, "Product not found")
-    if body.event not in EVENT_KINDS:
-        raise HTTPException(422, f"event must be one of {EVENT_KINDS}")
-    if body.type not in ("flat", "commission"):
-        raise HTTPException(422, "type must be 'flat' or 'commission'")
-    rule = (
-        db.query(IncentiveRule)
-        .filter_by(product_id=product_id, event=body.event)
-        .first()
-    )
-    if rule:
-        rule.type, rule.value, rule.field = body.type, body.value, body.field
-        rule.is_active = True
-    else:
-        db.add(IncentiveRule(product_id=product_id, **body.model_dump()))
+    for r in body.rules:
+        if r.event not in EVENT_KINDS:
+            raise HTTPException(422, f"event must be one of {EVENT_KINDS}")
+        if r.type not in ("flat", "commission"):
+            raise HTTPException(422, "type must be 'flat' or 'commission'")
+    for r in body.rules:
+        rule = (
+            db.query(IncentiveRule)
+            .filter_by(product_id=product_id, event=r.event)
+            .first()
+        )
+        if rule:
+            rule.type, rule.value, rule.field = r.type, r.value, r.field
+            rule.is_active = True
+        else:
+            db.add(IncentiveRule(product_id=product_id, **r.model_dump()))
     db.commit()
     db.refresh(product)
     return product_out(product)

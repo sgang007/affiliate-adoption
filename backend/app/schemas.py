@@ -38,6 +38,10 @@ class RuleIn(BaseModel):
     field: str | None = None  # dot path for commission type, e.g. params.subscription
 
 
+class RulesIn(BaseModel):
+    rules: list[RuleIn]
+
+
 class UserCreateIn(BaseModel):
     email: str
     name: str
