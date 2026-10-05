@@ -46,9 +46,17 @@ Prereqs: Python 3.11/3.12, Node 18+.
 cd backend
 python3.12 -m venv .venv && source .venv/bin/activate
 pip install -r requirements-dev.txt
-python -m scripts.seed          # demo admin + product + 3-level network + events
 uvicorn app.main:app --reload --port 8000
 ```
+
+First startup creates the tables and exactly one login: the admin, taken
+from the `ADMIN_EMAIL` / `ADMIN_PASSWORD` environment variables (defaults
+`admin@portal.local` / `admin123`; set them in `backend/.env` locally or as
+app settings in deployment). Everything else — products, rules, affiliates,
+the network — you create from the Admin console.
+
+Optional: `python -m scripts.seed` populates a demo product, a 4-affiliate
+network and a funnel event stream if you ever want pre-filled dashboards.
 
 ```bash
 # 2. Frontend (new terminal)
@@ -56,15 +64,6 @@ cd frontend
 npm install
 npm run dev                     # http://localhost:5173 (proxies /api + /r to :8000)
 ```
-
-**Demo logins** (seeded):
-
-| Role | Email | Password |
-|---|---|---|
-| Admin | `admin@portal.local` | `admin123` |
-| Root affiliate | `ananya@demo.in` | `demo123` |
-| L1 affiliates | `rohan@demo.in`, `priya@demo.in` | `demo123` |
-| L2 affiliate | `kabir@demo.in` | `demo123` |
 
 Run tests: `cd backend && python -m pytest tests/ -q` (covers the full flow:
 product → network → signed webhooks → cascade → invoice → payout).
