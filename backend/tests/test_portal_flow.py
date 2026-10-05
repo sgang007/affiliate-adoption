@@ -201,6 +201,82 @@ def test_webhook_rejects_bad_signature(client, admin_token):
     assert r.status_code == 401
 
 
+def test_admin_revenue_and_override_visibility(client, admin_token):
+    """The two bugs from the field report:
+    1. Admin economics — on a Rs 2000 subscription at 20%, the admin keeps
+       Rs 1600 and exactly Rs 400 flows into the network, top-down.
+    2. An intermediate affiliate whose income is pure overrides (no direct
+       sales) must still be visible in the admin's network view."""
+    r = client.post(
+        "/api/admin/products",
+        json={"name": "RevCheck", "url": "https://rev.example.com", "network_commission_pct": 20},
+        headers=auth(admin_token),
+    )
+    assert r.status_code == 200, r.text
+    product = r.json()
+    r = client.put(
+        f"/api/admin/products/{product['id']}/rules",
+        json={
+            "rules": [
+                {"event": "visited", "type": "flat", "value": 10},
+                {"event": "signed_up", "type": "flat", "value": 50},
+                {"event": "subscribed", "type": "commission", "value": 20, "field": "params.subscription"},
+            ]
+        },
+        headers=auth(admin_token),
+    )
+    assert r.status_code == 200, r.text
+
+    before = client.get("/api/dashboard", headers=auth(admin_token)).json()["revenue"]
+
+    m1 = accept_invite(client, admin_token, "m1@test.local", "M1")
+    m2 = accept_invite(client, m1["token"], "m2@test.local", "M2")
+    m1_id, m2_id = m1["user"]["id"], m2["user"]["id"]
+    link = client.post(f"/api/products/{product['id']}/link", headers=auth(m2["token"])).json()
+
+    secret = product["webhook_secret"].encode()
+    wh = f"/api/webhooks/meridian/{product['id']}"
+
+    def fire(event, params):
+        raw = json.dumps({"channel": link["slug"], "event": event, "params": params}).encode()
+        sig = hmac.new(secret, raw, hashlib.sha256).hexdigest()
+        r = client.post(
+            wh, content=raw,
+            headers={"Content-Type": "application/json", "X-Meridian-Signature": sig},
+        )
+        assert r.status_code == 200, r.text
+        return r.json()
+
+    # visited pays its flat rule once per unique visitor, split top-down.
+    res = fire("visited", {"email": "v@x.in", "device_type": "mobile"})
+    assert {c["user_id"]: c["amount"] for c in res["commissions"]} == {m1_id: 2.0, m2_id: 8.0}
+    assert fire("visited", {"email": "v@x.in"})["commissions"] == []  # same visitor repeats
+
+    fire("signed_up", {"email": "v@x.in", "name": "V"})  # 50 → M1 10, M2 40
+
+    # The spec example: Rs 2000 subscription at 20% → pool 400 for the
+    # network (M1 80, M2 320) and the admin keeps 1600.
+    res = fire("subscribed", {"email": "v@x.in", "subscription": "2000", "frequency": "monthly"})
+    assert {c["user_id"]: c["amount"] for c in res["commissions"]} == {m1_id: 80.0, m2_id: 320.0}
+
+    after = client.get("/api/dashboard", headers=auth(admin_token)).json()["revenue"]
+    assert round(after["gross"] - before["gross"], 2) == 2000.0
+    assert round(after["commissions_paid"] - before["commissions_paid"], 2) == 10 + 50 + 400
+    assert round(after["net"] - before["net"], 2) == 2000 - 460
+    # Accounting identity: gross = commissions + net, always.
+    assert round(after["gross"] - after["commissions_paid"], 2) == round(after["net"], 2)
+
+    # Admin network view: M1 has zero direct sales but Rs 92 in overrides
+    # (2 + 10 + 80) and must show up with that total.
+    net = client.get("/api/network", headers=auth(admin_token)).json()
+    assert net["viewer_role"] == "admin"
+    members = {m["email"]: m for m in net["members"]}
+    assert members["m1@test.local"]["direct_earnings"] == 0.0
+    assert members["m1@test.local"]["total_earned"] == 92.0
+    assert members["m2@test.local"]["total_earned"] == 8.0 + 40.0 + 320.0
+    assert net["tree"]["net_revenue"] == net["revenue"]["net"]
+
+
 def test_new_product_assigned_to_whole_network(client, admin_token):
     """A product created after affiliates joined is promoted by all of them."""
     r = client.post(

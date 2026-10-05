@@ -4,7 +4,9 @@ export interface TreeNode {
   id: number
   name: string
   direct_earnings: number
+  total_earned: number
   earned_for_me: number
+  net_revenue?: number
   children: TreeNode[]
 }
 
@@ -47,7 +49,18 @@ function layout(root: TreeNode): { placed: Placed[]; width: number; height: numb
   }
 }
 
-export default function NetworkGraph({ tree }: { tree: TreeNode }) {
+function nodeLabel(node: TreeNode, isRoot: boolean, viewerRole: string): string {
+  if (isRoot) {
+    return viewerRole === 'admin'
+      ? `keeps ${inr(node.net_revenue ?? 0)}`
+      : `earns ${inr(node.direct_earnings)}`
+  }
+  return viewerRole === 'admin'
+    ? `earned ${inr(node.total_earned)}`
+    : `+${inr(node.earned_for_me)} to you`
+}
+
+export default function NetworkGraph({ tree, viewerRole }: { tree: TreeNode; viewerRole: string }) {
   const { placed, width, height } = layout(tree)
   const pad = 20
   return (
@@ -89,7 +102,7 @@ export default function NetworkGraph({ tree }: { tree: TreeNode }) {
                 {p.node.name.length > 16 ? p.node.name.slice(0, 15) + '…' : p.node.name}
               </text>
               <text x={12} y={42} fill={isRoot ? '#2dd4bf' : '#f4b740'} fontSize={12} fontFamily="JetBrains Mono, monospace">
-                {isRoot ? `earns ${inr(p.node.direct_earnings)}` : `+${inr(p.node.earned_for_me)} to you`}
+                {nodeLabel(p.node, isRoot, viewerRole)}
               </text>
             </g>
           )

@@ -27,6 +27,7 @@ from ..models import (
     IncentiveRule,
     Product,
     ReferredUser,
+    RevenueEntry,
     User,
 )
 
@@ -58,8 +59,9 @@ STATUS_FOR = {
     "cancelled": "churned",
 }
 
-# Paid at most once per referred user, ever.
-ONE_TIME_EVENTS = {"signed_up", "trial", "subscribed"}
+# Paid at most once per referred user, ever ("visited" included: a non-zero
+# visited rule pays per unique visitor, not per page view).
+ONE_TIME_EVENTS = {"visited", "signed_up", "trial", "subscribed"}
 # Paid at most once per referred user per month → recurring income while the
 # product keeps sending the event (stops on cancellation).
 MONTHLY_EVENTS = {"renewal"}
@@ -112,6 +114,14 @@ def branch_below_admin(db: Session, converter: User) -> list[User]:
     ids = converter.path_ids or [converter.id]
     found = {u.id: u for u in db.query(User).filter(User.id.in_(ids)).all()}
     return [found[i] for i in ids if i in found and found[i].role != "admin"]
+
+
+def network_root_admin(db: Session, converter: User) -> User | None:
+    ids = converter.path_ids
+    if not ids:
+        return None
+    root = db.get(User, ids[0])
+    return root if root and root.role == "admin" else None
 
 
 def distribute(
@@ -234,6 +244,31 @@ def process_product_event(
                 event_type=event,
                 period=period,
             )
+            # Company-side ledger: the admin keeps whatever the event brought
+            # in minus the commission pool (negative for flat bounties, which
+            # carry no revenue of their own).
+            gross = Decimal(0)
+            if event in ("subscribed", "renewal") and params.get("subscription"):
+                try:
+                    gross = Decimal(str(params["subscription"]))
+                except Exception:
+                    gross = Decimal(0)
+            paid = sum((Decimal(c.amount) for c in commissions), Decimal(0))
+            root_admin = network_root_admin(db, link.user)
+            if root_admin and (gross > 0 or paid > 0):
+                db.add(
+                    RevenueEntry(
+                        admin_id=root_admin.id,
+                        product_id=product.id,
+                        event_id=db_event.id,
+                        referred_user_id=referred.id,
+                        event_type=event,
+                        gross_amount=q2(gross),
+                        commission_amount=q2(paid),
+                        net_amount=q2(gross - paid),
+                        period=period,
+                    )
+                )
 
     db.commit()
     return {

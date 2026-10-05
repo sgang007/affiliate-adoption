@@ -65,13 +65,22 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* Earnings */}
-      <div className="mb-6 grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <Stat label="Total earned" value={inr(dash.earnings.total)} accent="gold" />
-        <Stat label={`This month (${dash.period})`} value={inr(dash.earnings.this_month)} />
-        <Stat label="From my referrals" value={inr(dash.earnings.direct)} accent="mint" />
-        <Stat label="From my network" value={inr(dash.earnings.network)} sub="20% overrides, all levels" />
-      </div>
+      {/* Earnings — admins see company revenue, affiliates see commissions */}
+      {dash.revenue ? (
+        <div className="mb-6 grid grid-cols-2 gap-4 lg:grid-cols-4">
+          <Stat label="Gross revenue" value={inr(dash.revenue.gross)} accent="mint" sub="brought in by the network" />
+          <Stat label="Commissions paid" value={inr(dash.revenue.commissions_paid)} />
+          <Stat label="You keep (net)" value={inr(dash.revenue.net)} accent="gold" />
+          <Stat label={`This month net (${dash.period})`} value={inr(dash.revenue.this_month_net)} />
+        </div>
+      ) : (
+        <div className="mb-6 grid grid-cols-2 gap-4 lg:grid-cols-4">
+          <Stat label="Total earned" value={inr(dash.earnings.total)} accent="gold" />
+          <Stat label={`This month (${dash.period})`} value={inr(dash.earnings.this_month)} />
+          <Stat label="From my referrals" value={inr(dash.earnings.direct)} accent="mint" />
+          <Stat label="From my network" value={inr(dash.earnings.network)} sub="overrides from all levels" />
+        </div>
+      )}
 
       <div className="grid gap-6 lg:grid-cols-5">
         {/* Funnel */}

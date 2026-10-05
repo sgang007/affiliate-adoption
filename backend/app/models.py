@@ -208,6 +208,27 @@ class Commission(Base):
     referred_user = relationship("ReferredUser")
 
 
+class RevenueEntry(Base):
+    """The company (admin) side of every paid event: gross revenue the event
+    brought in, what was paid out in commissions, and what the admin keeps.
+    E.g. a Rs 2000 subscription with a 20% rule → gross 2000, commissions
+    400 (split down the branch), net 1600 to the admin."""
+
+    __tablename__ = "revenue_entries"
+
+    id = Column(Integer, primary_key=True)
+    admin_id = Column(Integer, ForeignKey("users.id"), index=True, nullable=False)
+    product_id = Column(Integer, ForeignKey("products.id"), nullable=False)
+    event_id = Column(Integer, ForeignKey("events.id"), nullable=True)
+    referred_user_id = Column(Integer, ForeignKey("referred_users.id"), nullable=True)
+    event_type = Column(String(40), nullable=False)
+    gross_amount = Column(Numeric(12, 2), default=0)  # revenue the event carried
+    commission_amount = Column(Numeric(12, 2), default=0)  # paid to the network
+    net_amount = Column(Numeric(12, 2), default=0)  # gross - commissions (can be negative for flat bounties)
+    period = Column(String(7), index=True, nullable=False)
+    created_at = Column(DateTime, default=utcnow)
+
+
 class PayoutRequest(Base):
     __tablename__ = "payout_requests"
 

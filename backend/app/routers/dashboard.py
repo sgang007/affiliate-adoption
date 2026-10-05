@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 
 from ..database import get_db
 from ..deps import get_current_user
-from ..models import AffiliateLink, Commission, ReferredUser, User
+from ..models import AffiliateLink, Commission, ReferredUser, RevenueEntry, User
 from ..services.commission import current_period
 
 router = APIRouter(prefix="/api", tags=["dashboard"])
@@ -17,6 +17,29 @@ def _descendants(db: Session, user: User) -> list[User]:
         .order_by(User.path)
         .all()
     )
+
+
+def _admin_revenue(db: Session, admin: User, period: str) -> dict:
+    gross, commissions, net = (
+        db.query(
+            func.coalesce(func.sum(RevenueEntry.gross_amount), 0),
+            func.coalesce(func.sum(RevenueEntry.commission_amount), 0),
+            func.coalesce(func.sum(RevenueEntry.net_amount), 0),
+        )
+        .filter(RevenueEntry.admin_id == admin.id)
+        .first()
+    )
+    month_net = (
+        db.query(func.coalesce(func.sum(RevenueEntry.net_amount), 0))
+        .filter(RevenueEntry.admin_id == admin.id, RevenueEntry.period == period)
+        .scalar()
+    )
+    return {
+        "gross": float(gross or 0),
+        "commissions_paid": float(commissions or 0),
+        "net": float(net or 0),
+        "this_month_net": float(month_net or 0),
+    }
 
 
 @router.get("/dashboard")
@@ -59,7 +82,7 @@ def dashboard(user: User = Depends(get_current_user), db: Session = Depends(get_
         )
 
     team_size = len(_descendants(db, user))
-    return {
+    out = {
         "earnings": {
             "total": total,
             "direct": direct,
@@ -78,18 +101,28 @@ def dashboard(user: User = Depends(get_current_user), db: Session = Depends(get_
         "network_size": team_size,
         "period": period,
     }
+    if user.role == "admin":
+        out["revenue"] = _admin_revenue(db, user, period)
+    return out
 
 
 @router.get("/network")
 def network(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    """The affiliate's network tree with, per member: their own direct
-    earnings and how much of MY earnings came from them (override share)."""
+    """The viewer's network tree. Affiliates see what each member adds to
+    THEIR earnings; admins see each member's full earnings and the company's
+    gross / commissions / net revenue."""
     descendants = _descendants(db, user)
     all_ids = [user.id] + [d.id for d in descendants]
 
     direct_earnings = dict(
         db.query(Commission.user_id, func.sum(Commission.amount))
         .filter(Commission.user_id.in_(all_ids), Commission.source_user_id == Commission.user_id)
+        .group_by(Commission.user_id)
+        .all()
+    )
+    total_earnings = dict(
+        db.query(Commission.user_id, func.sum(Commission.amount))
+        .filter(Commission.user_id.in_(all_ids))
         .group_by(Commission.user_id)
         .all()
     )
@@ -100,31 +133,36 @@ def network(user: User = Depends(get_current_user), db: Session = Depends(get_db
         .all()
     )
 
-    nodes = {user.id: _node(user, user, direct_earnings, my_share_from)}
-    for d in descendants:
-        nodes[d.id] = _node(d, user, direct_earnings, my_share_from)
+    nodes = {u.id: _node(u, user, direct_earnings, total_earnings, my_share_from) for u in [user, *descendants]}
     for d in descendants:
         parent = nodes.get(d.parent_id)
         if parent:
             parent["children"].append(nodes[d.id])
 
     members = [nodes[d.id] for d in descendants]
-    return {
+    out = {
         "tree": nodes[user.id],
         "members": [{k: v for k, v in m.items() if k != "children"} for m in members],
         "network_earnings": round(
             sum(float(v or 0) for k, v in my_share_from.items() if k != user.id), 2
         ),
+        "viewer_role": user.role,
     }
+    if user.role == "admin":
+        revenue = _admin_revenue(db, user, current_period())
+        out["revenue"] = revenue
+        nodes[user.id]["net_revenue"] = revenue["net"]
+    return out
 
 
-def _node(u: User, me: User, direct_earnings: dict, my_share_from: dict) -> dict:
+def _node(u: User, me: User, direct: dict, total: dict, my_share_from: dict) -> dict:
     return {
         "id": u.id,
         "name": u.name,
         "email": u.email,
         "depth": max(len(u.path_ids) - len(me.path_ids), 0),
-        "direct_earnings": float(direct_earnings.get(u.id, 0) or 0),
+        "direct_earnings": float(direct.get(u.id, 0) or 0),
+        "total_earned": float(total.get(u.id, 0) or 0),
         "earned_for_me": float(my_share_from.get(u.id, 0) or 0) if u.id != me.id else 0.0,
         "children": [],
     }

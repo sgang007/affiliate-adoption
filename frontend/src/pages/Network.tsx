@@ -13,34 +13,49 @@ export default function Network() {
 
   if (!net) return <Layout title="Your Network">{null}</Layout>
 
-  const totalDirect = net.tree.direct_earnings
+  const isAdmin = net.viewer_role === 'admin'
 
   return (
     <Layout title="Your Network">
       <div className="mb-6 grid grid-cols-2 gap-4 lg:grid-cols-3">
         <Stat label="Affiliates in your network" value={String(net.members.length)} accent="mint" />
-        <Stat label="You earn directly" value={inr(totalDirect)} />
-        <Stat
-          label="Your network earns you"
-          value={inr(net.network_earnings)}
-          accent="gold"
-          sub="20% override on every level below you"
-        />
+        {isAdmin ? (
+          <>
+            <Stat label="Commissions paid to network" value={inr(net.revenue.commissions_paid)} />
+            <Stat
+              label="You keep (net revenue)"
+              value={inr(net.revenue.net)}
+              accent="gold"
+              sub={`of ${inr(net.revenue.gross)} gross brought in`}
+            />
+          </>
+        ) : (
+          <>
+            <Stat label="You earn directly" value={inr(net.tree.direct_earnings)} />
+            <Stat
+              label="Your network earns you"
+              value={inr(net.network_earnings)}
+              accent="gold"
+              sub="network commission on every level below you"
+            />
+          </>
+        )}
       </div>
 
       <div className="card mb-6 p-6 rise">
         <h2 className="mb-2 font-display text-lg font-semibold">Network map</h2>
         <p className="mb-6 text-sm text-fog">
-          Every node shows what that affiliate adds to <i>your</i> earnings. Grow the tree,
-          grow the passive income.
+          {isAdmin
+            ? 'Every node shows that affiliate’s total earnings — direct sales plus network overrides. The root is you: gross revenue minus all commissions.'
+            : 'Every node shows what that affiliate adds to your earnings. Grow the tree, grow the passive income.'}
         </p>
         {net.members.length === 0 ? (
           <Empty>
             Your network is empty. Invite your first affiliate from the{' '}
-            <a href="/team" className="text-mint">My Team</a> page and start earning overrides. 🌱
+            <a href="/team" className="text-mint">My Team</a> page{isAdmin ? '' : ' and start earning overrides'}. 🌱
           </Empty>
         ) : (
-          <NetworkGraph tree={net.tree} />
+          <NetworkGraph tree={net.tree} viewerRole={net.viewer_role} />
         )}
       </div>
 
@@ -53,13 +68,16 @@ export default function Network() {
                 <tr className="border-b border-edge text-left text-xs font-semibold uppercase tracking-wider text-fog">
                   <th className="pb-3 pr-4">Affiliate</th>
                   <th className="pb-3 pr-4">Level</th>
-                  <th className="pb-3 pr-4 text-right">Their direct earnings</th>
-                  <th className="pb-3 text-right">Earned for you</th>
+                  <th className="pb-3 pr-4 text-right">Direct sales</th>
+                  <th className="pb-3 pr-4 text-right">Total earned</th>
+                  {!isAdmin && <th className="pb-3 text-right">Earned for you</th>}
                 </tr>
               </thead>
               <tbody>
                 {[...net.members]
-                  .sort((a, b) => b.earned_for_me - a.earned_for_me)
+                  .sort((a, b) =>
+                    isAdmin ? b.total_earned - a.total_earned : b.earned_for_me - a.earned_for_me,
+                  )
                   .map((m, i) => (
                     <tr key={m.id} className="border-b border-edge/50">
                       <td className="py-3 pr-4">
@@ -69,7 +87,12 @@ export default function Network() {
                       </td>
                       <td className="py-3 pr-4 text-fog">L{m.depth}</td>
                       <td className="py-3 pr-4 text-right text-fog">{inr(m.direct_earnings)}</td>
-                      <td className="py-3 text-right"><Money amount={m.earned_for_me} /></td>
+                      <td className="py-3 pr-4 text-right">
+                        {isAdmin ? <Money amount={m.total_earned} /> : <span className="text-fog">{inr(m.total_earned)}</span>}
+                      </td>
+                      {!isAdmin && (
+                        <td className="py-3 text-right"><Money amount={m.earned_for_me} /></td>
+                      )}
                     </tr>
                   ))}
               </tbody>
