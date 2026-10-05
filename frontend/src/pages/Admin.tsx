@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useState } from 'react'
-import { api, inr } from '../api'
+import { api, copyText, inr } from '../api'
 import Layout from '../components/Layout'
 import { Chip, CopyField, Empty, ErrorNote, Stat } from '../components/ui'
 
@@ -110,11 +110,19 @@ function ProductEditor({ product, onChange }: { product: any; onChange: () => vo
   const [pct, setPct] = useState(product.network_commission_pct)
   const [error, setError] = useState('')
 
-  async function showPrompt() {
-    if (open === 'integration') return setOpen(null)
-    const res = await api.get(`/api/admin/products/${product.id}/integration-prompt`)
-    setPrompt(res.prompt)
-    setOpen('integration')
+  // The prompt is generated from the live product state, so re-fetch it
+  // whenever the panel is open and rules/templates/commission change.
+  useEffect(() => {
+    if (open === 'integration') {
+      api
+        .get(`/api/admin/products/${product.id}/integration-prompt`)
+        .then((res) => setPrompt(res.prompt))
+        .catch((e) => setError(e.message))
+    }
+  }, [open, product])
+
+  function showPrompt() {
+    setOpen(open === 'integration' ? null : 'integration')
   }
 
   async function savePct() {
@@ -163,13 +171,15 @@ function ProductEditor({ product, onChange }: { product: any; onChange: () => vo
         <div className="mt-5 space-y-3 border-t border-edge pt-5">
           <p className="text-sm text-fog">
             Paste this into the product's codebase (or hand it to an AI coding agent). It contains the
-            channel-caching snippet, the <code className="font-mono text-mint">referrer_id</code> column
-            instruction, all message formats and the signing secret.
+            webhook endpoint, signing code with the secret, the channel-caching snippet, the{' '}
+            <code className="font-mono text-mint">referrer_id</code> column instruction and all message
+            formats. <b className="text-snow">Always current</b> — it regenerates from the live rules
+            and templates every time it's opened or copied.
           </p>
           <div className="flex gap-2">
             <button
               className="btn-primary px-3 py-1.5 text-xs"
-              onClick={() => navigator.clipboard.writeText(prompt)}
+              onClick={() => copyText(prompt)}
             >
               Copy full prompt
             </button>
@@ -195,6 +205,7 @@ function RulesEditor({ product, onChange }: { product: any; onChange: () => void
     return d
   })
   const [saved, setSaved] = useState(false)
+  const [copied, setCopied] = useState(false)
   const [error, setError] = useState('')
 
   async function saveAll() {
@@ -213,6 +224,19 @@ function RulesEditor({ product, onChange }: { product: any; onChange: () => void
       })
       setSaved(true)
       onChange()
+    } catch (e: any) {
+      setError(e.message)
+    }
+  }
+
+  async function copyPrompt() {
+    setError('')
+    try {
+      // Fetched fresh on every copy, so it always reflects the saved rules.
+      const res = await api.get(`/api/admin/products/${product.id}/integration-prompt`)
+      await copyText(res.prompt)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
     } catch (e: any) {
       setError(e.message)
     }
@@ -271,9 +295,12 @@ function RulesEditor({ product, onChange }: { product: any; onChange: () => void
         )
       })}
       {error && <ErrorNote message={error} />}
-      <div className="pt-2">
+      <div className="flex flex-wrap items-center gap-3 pt-2">
         <button className="btn-primary px-5 py-2 text-sm" onClick={saveAll}>
-          {saved ? 'All rules saved ✓' : 'Save all rules'}
+          {saved ? 'Saved ✓ — prompt updated' : 'Save all rules'}
+        </button>
+        <button className="btn-ghost px-5 py-2 text-sm" onClick={copyPrompt}>
+          {copied ? 'Prompt copied ✓' : 'Copy integration prompt'}
         </button>
       </div>
     </div>

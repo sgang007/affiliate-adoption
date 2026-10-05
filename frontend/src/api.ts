@@ -62,3 +62,25 @@ export const api = {
 
 export const inr = (n: number) =>
   '₹' + n.toLocaleString('en-IN', { maximumFractionDigits: 2 })
+
+export async function copyText(text: string): Promise<void> {
+  try {
+    await navigator.clipboard.writeText(text)
+    return
+  } catch {
+    // Clipboard API can be blocked (embedded webviews, permission policies) —
+    // fall back to a hidden textarea + execCommand.
+    const ta = document.createElement('textarea')
+    ta.value = text
+    ta.style.position = 'fixed'
+    ta.style.opacity = '0'
+    document.body.appendChild(ta)
+    ta.focus()
+    ta.select()
+    try {
+      if (!document.execCommand('copy')) throw new Error('copy rejected')
+    } finally {
+      document.body.removeChild(ta)
+    }
+  }
+}

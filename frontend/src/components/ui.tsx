@@ -1,5 +1,5 @@
 import { ReactNode, useState } from 'react'
-import { inr } from '../api'
+import { copyText, inr } from '../api'
 
 export function Stat({ label, value, accent, sub }: { label: string; value: string; accent?: 'mint' | 'gold'; sub?: string }) {
   return (
@@ -50,8 +50,8 @@ export function CopyField({ value, label }: { value: string; label?: string }) {
         </code>
         <button
           className="btn-ghost px-3 py-2 text-sm"
-          onClick={() => {
-            navigator.clipboard.writeText(value)
+          onClick={async () => {
+            await copyText(value)
             setCopied(true)
             setTimeout(() => setCopied(false), 1500)
           }}
