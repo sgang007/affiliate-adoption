@@ -42,7 +42,9 @@ EVENT_ALIASES = {
     "trial": "trial",
     "trial_started": "trial",
     "subscribed": "subscribed",
-    "subscription_renewed": "subscribed",
+    "renewal": "renewal",
+    "renewed": "renewal",
+    "subscription_renewed": "renewal",
     "cancelled": "cancelled",
     "subscription_cancelled": "cancelled",
 }
@@ -52,14 +54,15 @@ STATUS_FOR = {
     "signed_up": "signed_up",
     "trial": "trial",
     "subscribed": "subscribed",
+    "renewal": "subscribed",  # a renewal keeps the user in the subscribed state
     "cancelled": "churned",
 }
 
 # Paid at most once per referred user, ever.
-ONE_TIME_EVENTS = {"signed_up", "trial"}
+ONE_TIME_EVENTS = {"signed_up", "trial", "subscribed"}
 # Paid at most once per referred user per month → recurring income while the
 # product keeps sending the event (stops on cancellation).
-MONTHLY_EVENTS = {"subscribed"}
+MONTHLY_EVENTS = {"renewal"}
 
 
 def q2(x: Decimal) -> Decimal:
@@ -197,7 +200,7 @@ def process_product_event(
         or REFERRAL_STATUS_ORDER[new_status] > REFERRAL_STATUS_ORDER.get(referred.status, 0)
     ):
         referred.status = new_status
-    if event == "subscribed" and params.get("subscription"):
+    if event in ("subscribed", "renewal") and params.get("subscription"):
         try:
             referred.subscription_amount = Decimal(str(params["subscription"]))
         except Exception:

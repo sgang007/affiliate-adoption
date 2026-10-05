@@ -55,19 +55,20 @@ Message format — `{channel, event, params}`:
 
 Default params per event (admin-editable templates under **Event messages**):
 
-| `event` | `params` |
-|---|---|
-| `visited` | `user_info` (browser locale), `location`, `device_type` |
-| `signed_up` | `email`, `name`, `job_role`, `industry` |
-| `trial` | `name`, `email`, `credits_granted`, `trial_duration` |
-| `subscribed` | `email`, `name`, `plan`, `subscription`, `frequency` |
+| `event` | `params` | Pays |
+|---|---|---|
+| `visited` | `user_info` (browser locale), `location`, `device_type` | per rule |
+| `signed_up` | `email`, `name`, `job_role`, `industry` | once per user |
+| `trial` | `name`, `email`, `credits_granted`, `trial_duration` | once per user |
+| `subscribed` | `email`, `name`, `plan`, `subscription`, `frequency` | once per user (first charge) |
+| `renewal` | same as `subscribed` + `renewal_count` | once per user **per month** — the recurring income stream |
 
-Aliases are accepted (`signed up`, `trial_started`, `subscription_renewed`,
-`cancelled`). Send `subscribed` on the first charge **and every renewal** —
-subscription payouts happen at most once per referred user per month, so the
-monthly re-send is what produces recurring affiliate income; it stops when
-you stop sending (or send `cancelled`). `signed_up`/`trial` never pay twice,
-so retries are always safe.
+Aliases are accepted (`signed up`, `trial_started`, `renewed`,
+`subscription_renewed`, `cancelled`). Send `subscribed` on the first
+successful charge and `renewal` on every later charge (hook your payment
+provider's invoice-paid webhook); stop when the subscription is cancelled
+(optionally send `cancelled`). One-time events never pay twice, so retries
+are always safe.
 
 ## 3. Incentive rules (configured portal-side, no product code involved)
 

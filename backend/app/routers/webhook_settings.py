@@ -14,7 +14,7 @@ router = APIRouter(
     dependencies=[Depends(require_admin)],
 )
 
-VALID_EVENTS = {"all", "visited", "signed_up", "trial", "subscribed"}
+VALID_EVENTS = {"all", "visited", "signed_up", "trial", "subscribed", "renewal"}
 VALID_FORMATS = {"json", "form"}
 
 

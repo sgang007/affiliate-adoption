@@ -105,7 +105,7 @@ export default function ProductDetail() {
                     <span className="font-display font-semibold text-gold">
                       {r.type === 'flat'
                         ? inr(r.value)
-                        : `${r.value}% of subscription${r.event === 'subscribed' ? ' /mo' : ''}`}
+                        : `${r.value}% of subscription${r.event === 'renewal' ? ' /mo' : ''}`}
                     </span>
                   </div>
                 ))}

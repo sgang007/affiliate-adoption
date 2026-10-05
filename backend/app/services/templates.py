@@ -53,6 +53,18 @@ def default_event_templates() -> dict:
                 "frequency": "monthly",
             },
         },
+        "renewal": {
+            "channel": "<affiliate-id>",
+            "event": "renewal",
+            "params": {
+                "email": "shubho@getmeridian.tech",
+                "name": "Shubhojyoti Ganguly",
+                "plan": "Founder-Starter",
+                "subscription": "2000",
+                "frequency": "monthly",
+                "renewal_count": 2,
+            },
+        },
     }
 
 
@@ -114,12 +126,13 @@ Message format per event — send exactly these shapes, with real values:
 {templates_md}
 
 Send `visited` on the first attributed page view (channel cookie present),
-`signed_up` on account creation, `trial` on trial activation, and
-`subscribed` on every successful charge — the first one **and every
-renewal** (hook your payment provider's invoice-paid webhook). Subscription
-payouts are per-month, so re-sending `subscribed` monthly is what keeps the
-affiliate's recurring income flowing; stop when the subscription is
-cancelled (optionally send `{{"event": "cancelled", ...}}`).
+`signed_up` on account creation, `trial` on trial activation, `subscribed`
+on the **first** successful charge, and `renewal` on **every later**
+successful charge (hook your payment provider's invoice-paid webhook).
+Renewal payouts happen at most once per user per month, so sending
+`renewal` on each billing cycle is what keeps the affiliate's recurring
+income flowing; stop when the subscription is cancelled (optionally send
+`{{"event": "cancelled", ...}}`).
 
 ## 4. Delivery semantics
 

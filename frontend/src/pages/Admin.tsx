@@ -4,7 +4,7 @@ import Layout from '../components/Layout'
 import { Chip, CopyField, Empty, ErrorNote, Stat } from '../components/ui'
 
 type Tab = 'products' | 'users' | 'payouts'
-const EVENTS = ['visited', 'signed_up', 'trial', 'subscribed']
+const EVENTS = ['visited', 'signed_up', 'trial', 'subscribed', 'renewal']
 
 export default function Admin() {
   const [tab, setTab] = useState<Tab>('products')
@@ -228,8 +228,9 @@ function RulesEditor({ product, onChange }: { product: any; onChange: () => void
       <p className="mb-3 text-sm text-fog">
         What the network earns per event. <b className="text-snow">Flat</b> pays a fixed amount;{' '}
         <b className="text-snow">commission</b> pays a % of a field from the event message (e.g.{' '}
-        <code className="font-mono text-mint">params.subscription</code>). Subscribed pays once per
-        user per month — recurring while the product keeps sending it.
+        <code className="font-mono text-mint">params.subscription</code>). Signed up, trial and
+        subscribed pay once per user; <b className="text-snow">renewal</b> pays once per user per
+        month — recurring while the product keeps sending it.
       </p>
       <div className="grid grid-cols-[5.5rem_7rem_5rem_minmax(5rem,1fr)] items-center gap-x-2 px-3 text-xs font-semibold uppercase tracking-wider text-fog">
         <span>Event</span>

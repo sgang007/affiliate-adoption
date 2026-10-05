@@ -23,6 +23,7 @@ EVENT_NAME = {
     "signed_up": "signed_up",
     "trial": "trial",
     "subscribed": "subscribed",
+    "renewal": "renewal",
     "cancelled": "churned",
 }
 

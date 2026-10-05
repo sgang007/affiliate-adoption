@@ -32,6 +32,7 @@ DEFAULT_RULES = [
     {"event": "signed_up", "type": "flat", "value": 100, "field": None},
     {"event": "trial", "type": "flat", "value": 300, "field": None},
     {"event": "subscribed", "type": "commission", "value": 20, "field": "params.subscription"},
+    {"event": "renewal", "type": "commission", "value": 20, "field": "params.subscription"},
 ]
 
 

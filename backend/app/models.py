@@ -91,7 +91,7 @@ class Product(Base):
     rules = relationship("IncentiveRule", backref="product", cascade="all, delete-orphan")
 
 
-EVENT_KINDS = ["visited", "signed_up", "trial", "subscribed"]
+EVENT_KINDS = ["visited", "signed_up", "trial", "subscribed", "renewal"]
 
 
 class IncentiveRule(Base):

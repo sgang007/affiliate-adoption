@@ -42,8 +42,10 @@ def test_full_flow(client, admin_token):
     assert r.status_code == 200, r.text
     product = r.json()
     assert product["webhook_url"].endswith(f"/api/webhooks/meridian/{product['id']}")
-    assert {x["event"] for x in product["rules"]} == {"visited", "signed_up", "trial", "subscribed"}
-    assert "signed_up" in product["event_templates"]
+    assert {x["event"] for x in product["rules"]} == {
+        "visited", "signed_up", "trial", "subscribed", "renewal"
+    }
+    assert "renewal" in product["event_templates"]
 
     # Admin tunes the rules to the spec example: signed_up flat 300,
     # subscribed 20% of params.subscription.
@@ -126,9 +128,21 @@ def test_full_flow(client, admin_token):
     assert amounts == [256.0, 80.0, 64.0]
     assert sum(amounts) == 400.0
 
-    # Second subscribed message in the same month is deduped (renewals next
-    # month pay again — recurring income).
+    # subscribed is a one-time reward — replaying it never pays again.
     res = fire(d_link["slug"], "subscribed", {"email": "u1@x.in", "subscription": "2000"})
+    assert res["commissions"] == []
+
+    # renewal has its own rule (20% of params.subscription) and pays once per
+    # user per month — the recurring income stream.
+    res = fire(
+        d_link["slug"],
+        "renewal",
+        {"email": "u1@x.in", "subscription": "2000", "frequency": "monthly", "renewal_count": 2},
+    )
+    amounts = sorted((x["amount"] for x in res["commissions"]), reverse=True)
+    assert amounts == [256.0, 80.0, 64.0]
+    # Same-month duplicate renewal is deduped; the payment-provider alias works too.
+    res = fire(d_link["slug"], "subscription_renewed", {"email": "u1@x.in", "subscription": "2000"})
     assert res["commissions"] == []
 
     # Direct child of admin converts → keeps the full payable.
@@ -139,15 +153,15 @@ def test_full_flow(client, admin_token):
         {"user_id": b["user"]["id"], "amount": 300.0, "type": "signed_up"}
     ]
 
-    # Dashboards: B earned 300 direct + 60 + 80 network overrides.
+    # Dashboards: B earned 300 direct + 60 + 80 + 80 network overrides.
     r = client.get("/api/dashboard", headers=auth(b_token))
     dash = r.json()
     assert dash["earnings"]["direct"] == 300.0
-    assert dash["earnings"]["network"] == 60.0 + 80.0
+    assert dash["earnings"]["network"] == 60.0 + 80.0 + 80.0
 
     # Ledger + payout request for D.
     r = client.get("/api/payouts", headers=auth(d_token))
-    assert r.json()["balance_pending"] == 192.0 + 256.0
+    assert r.json()["balance_pending"] == 192.0 + 256.0 + 256.0
     r = client.post(
         "/api/payouts/request",
         json={"upi": "d@upi", "account_name": "D"},
@@ -155,7 +169,7 @@ def test_full_flow(client, admin_token):
     )
     assert r.status_code == 200, r.text
     req = r.json()
-    assert req["amount"] == 448.0 and req["status"] == "requested"
+    assert req["amount"] == 704.0 and req["status"] == "requested"
 
     # Admin approves, then marks paid (which emails the affiliate).
     r = client.post(
@@ -169,7 +183,7 @@ def test_full_flow(client, admin_token):
 
     r = client.get("/api/payouts", headers=auth(d_token))
     data = r.json()
-    assert data["total_paid"] == 448.0 and data["balance_pending"] == 0.0
+    assert data["total_paid"] == 704.0 and data["balance_pending"] == 0.0
 
     # Admins never earn and cannot request payouts.
     r = client.post("/api/payouts/request", json={"upi": "a@upi"}, headers=auth(admin_token))

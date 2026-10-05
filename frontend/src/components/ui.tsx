@@ -22,6 +22,7 @@ const STATUS_STYLE: Record<string, string> = {
   signed_up: 'bg-mint/15 text-mint',
   trial: 'bg-gold/15 text-gold',
   subscribed: 'bg-leaf/15 text-leaf',
+  renewal: 'bg-leaf/15 text-leaf',
   churned: 'bg-coral/15 text-coral',
   pending: 'bg-gold/15 text-gold',
   draft: 'bg-edge text-fog',
