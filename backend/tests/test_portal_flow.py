@@ -61,7 +61,13 @@ def test_full_flow(client, admin_token):
         f"/api/admin/products/{product['id']}/integration-prompt", headers=auth(admin_token)
     )
     prompt = r.json()["prompt"]
-    assert "referrer_id" in prompt and "channel" in prompt and product["webhook_secret"] in prompt
+    assert "referrer_id" in prompt and "channel" in prompt
+    # Endpoint, secret and signing instructions must be explicit.
+    assert product["webhook_url"] in prompt
+    assert product["webhook_secret"] in prompt
+    assert "X-Meridian-Signature" in prompt and "HMAC" in prompt
+    # Renewal is covered in the message formats.
+    assert '"event": "renewal"' in prompt
 
     # Network: admin invites B; B invites C; C invites D.
     b = accept_invite(client, admin_token, "b@test.local", "B")

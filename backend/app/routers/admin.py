@@ -45,7 +45,9 @@ def product_out(p: Product) -> dict:
         "currency": p.currency,
         "price": float(p.price or 0),
         "network_commission_pct": float(p.network_commission_pct or 0),
-        "event_templates": p.event_templates or default_event_templates(),
+        # Merge over defaults so newly introduced event types (e.g. renewal)
+        # appear even on products created before them.
+        "event_templates": {**default_event_templates(), **(p.event_templates or {})},
         "rules": [
             {
                 "id": r.id,
