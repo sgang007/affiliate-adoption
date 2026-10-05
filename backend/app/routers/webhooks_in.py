@@ -1,43 +1,18 @@
-"""Public endpoints: the referral tracking redirect and the inbound
-product webhook (Meridian's product intelligence engine)."""
+"""Public endpoint: the inbound product webhook (Meridian's product
+intelligence engine). Attribution rides entirely on the ?channel= query
+param that the product cookies and stamps onto its users as referrer_id."""
 import hashlib
 import hmac
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
-from fastapi.responses import RedirectResponse
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
 from ..database import get_db
-from ..models import AffiliateLink, Event, Product, ReferredUser
+from ..models import Product
 from ..schemas import ProductEvent
 from ..services.commission import process_product_event
-from ..services.dispatcher import build_deliveries, send_deliveries
 
 router = APIRouter(tags=["public"])
-
-COOKIE_MAX_AGE = 60 * 60 * 24 * 90  # 90-day attribution window
-
-
-@router.get("/r/{product_id}/{channel}")
-def referral_redirect(product_id: int, channel: str, db: Session = Depends(get_db)):
-    """Optional tracking hop: records the visit portal-side, pins the channel
-    cookie, and forwards to the product with ?channel=<affiliate-id>."""
-    link = (
-        db.query(AffiliateLink)
-        .filter(AffiliateLink.product_id == product_id, AffiliateLink.slug == channel)
-        .first()
-    )
-    if not link or not link.product.is_active:
-        raise HTTPException(404, "Referral link not found")
-    link.visits = (link.visits or 0) + 1
-    db.add(Event(link_id=link.id, type="link_visit", payload={}))
-    db.commit()
-
-    sep = "&" if "?" in link.product.url else "?"
-    target = f"{link.product.url}{sep}channel={channel}"
-    response = RedirectResponse(target, status_code=302)
-    response.set_cookie("channel", channel, max_age=COOKIE_MAX_AGE, httponly=False, samesite="lax")
-    return response
 
 
 def _verify_signature(secret: str, raw_body: bytes, signature: str | None) -> bool:
@@ -54,7 +29,6 @@ async def product_webhook(
     product_id: int,
     body: ProductEvent,
     request: Request,
-    background: BackgroundTasks,
     db: Session = Depends(get_db),
 ):
     product = db.get(Product, product_id)
@@ -79,11 +53,4 @@ async def product_webhook(
     except LookupError as e:
         raise HTTPException(404, str(e))
 
-    # Forward to any admin-configured outbound callback endpoints.
-    link = db.get(AffiliateLink, result["link_id"])
-    referred = db.get(ReferredUser, result["referred_user_id"])
-    deliveries = build_deliveries(db, result["event"], link, referred, result["commissions"])
-    if deliveries:
-        background.add_task(send_deliveries, deliveries)
-
-    return {"ok": True, **result, "callbacks_scheduled": len(deliveries)}
+    return {"ok": True, **result}

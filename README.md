@@ -22,7 +22,7 @@ Functions** (API) + **Azure Static Web Apps** (frontend).
 | **Integration prompt generator**: one copy-paste doc with channel caching, `referrer_id` column, formats & secret | Admin console → ⚡ Integration prompt |
 | Affiliate identity: hex hash of email = the `?channel=` id on every link | `backend/app/services/identity.py` |
 | Webhook ingestion `{channel, event, params}`, HMAC-signed, idempotent | `POST /api/webhooks/meridian/{product_id}` |
-| Admin-only outbound callbacks (JSON/form, signed) to external systems | `/api/webhook-settings` (admin) |
+| Invite emails + payout confirmations via Resend (SMTP fallback), invite join-status, per-member funnel stats | My Team page |
 | Top-down distribution: admin earns ₹0; each level takes network % of the pool, converter keeps the rest | `backend/app/services/commission.py` |
 | Referred-user dashboard with statuses and per-user earnings | Product page |
 | Network graph + leaderboard: what every descendant earns *you* | Network page |

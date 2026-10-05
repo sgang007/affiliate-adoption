@@ -5,25 +5,22 @@
 > webhook URL, signing secret, current message templates and rules — paste it
 > into the product's codebase or hand it to an AI coding agent.
 
-The portal and the product talk in both directions:
+The integration has exactly two moving parts:
 
 1. **Attribution:** referral links carry `?channel=<affiliate-id>`. The
    product cookies that value (90 days, first-touch) and stamps it onto the
    user record at signup as `referrer_id`.
 2. **Events (product → portal):** the product POSTs lifecycle messages to
    the product's webhook URL.
-3. **Callbacks (portal → admin systems):** optionally, the portal forwards
-   processed events to admin-configured endpoints (JSON or form, signed).
 
 ## 1. Affiliate identity and referral links
 
 Every affiliate's channel id is a **hex hash of their email** (e.g.
-`das232edads`) — one id across all products. Links:
-
-| Link | Example |
-|---|---|
-| Referral link | `https://getmeridian.tech?channel=94825aa6b280` |
-| Tracked hop (optional, counts the visit portal-side) | `https://<portal>/r/<product_id>/94825aa6b280` |
+`das232edads`) — one id across all products. Their referral link is simply
+the product URL with the channel attached:
+`https://getmeridian.tech?channel=94825aa6b280`. Links are generated
+automatically the moment a product is assigned and shown front-and-center
+on the affiliate's dashboard.
 
 The product must add a `referrer_id` column to its user table: copy the
 `channel` cookie into it at signup, then send it as `channel` on **every**

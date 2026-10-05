@@ -13,8 +13,7 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     jwt_expire_minutes: int = 60 * 24
 
-    # Base URL of this API (used to build /r/<slug> tracking links and
-    # the Meridian webhook URLs shown to admins).
+    # Base URL of this API (used to build the webhook URLs shown to admins).
     portal_base_url: str = "http://localhost:8000"
     frontend_url: str = "http://localhost:5173"
     cors_origins: str = "http://localhost:5173,http://localhost:4173,http://127.0.0.1:5173"
@@ -24,12 +23,14 @@ class Settings(BaseSettings):
     admin_password: str = "admin123"
     admin_name: str = "Portal Admin"
 
-    # Optional SMTP for affiliate invite emails; falls back to logging.
+    # Email delivery: Resend (preferred — just set the API key), SMTP as a
+    # fallback, console logging when neither is configured.
+    resend_api_key: str = ""
+    email_from: str = "Adoption HQ <onboarding@resend.dev>"
     smtp_host: str = ""
     smtp_port: int = 587
     smtp_user: str = ""
     smtp_password: str = ""
-    smtp_from: str = "no-reply@portal.local"
 
     class Config:
         env_file = ".env"

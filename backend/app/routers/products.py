@@ -2,7 +2,6 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from ..config import get_settings
 from ..database import get_db
 from ..deps import get_current_user
 from ..models import (
@@ -16,7 +15,6 @@ from ..models import (
 )
 
 router = APIRouter(prefix="/api/products", tags=["products"])
-settings = get_settings()
 
 
 def _assigned_product(db: Session, user: User, product_id: int) -> Product:
@@ -77,7 +75,6 @@ def _link_out(link: AffiliateLink, product: Product) -> dict:
         "id": link.id,
         "slug": link.slug,
         "referral_url": f"{product.url}{sep}channel={link.slug}",
-        "tracking_url": f"{settings.portal_base_url}/r/{product.id}/{link.slug}",
     }
 
 
@@ -112,12 +109,12 @@ def my_products(user: User = Depends(get_current_user), db: Session = Depends(ge
     out = []
     for a in assignments:
         p = a.product
-        link = (
-            db.query(AffiliateLink).filter_by(product_id=p.id, user_id=user.id).first()
-        )
+        # Referral links exist from the moment a product is assigned — the
+        # dashboard shows them without any extra step.
+        link = _get_or_create_link(db, user, p)
         item = _product_base(p)
-        item["link"] = _link_out(link, p) if link else None
-        item["stats"] = _link_stats(db, link) if link else None
+        item["link"] = _link_out(link, p)
+        item["stats"] = _link_stats(db, link)
         out.append(item)
     return out
 

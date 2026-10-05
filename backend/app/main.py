@@ -12,7 +12,6 @@ from .routers import (
     payouts,
     products,
     team,
-    webhook_settings,
     webhooks_in,
 )
 
@@ -41,7 +40,6 @@ app.include_router(products.router)
 app.include_router(dashboard.router)
 app.include_router(team.router)
 app.include_router(payouts.router)
-app.include_router(webhook_settings.router)
 app.include_router(webhooks_in.router)
 
 

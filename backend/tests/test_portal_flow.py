@@ -80,16 +80,11 @@ def test_full_flow(client, admin_token):
     # Each affiliate's channel is the hex hash of their email.
     assert d["user"]["affiliate_id"] == hashlib.sha256(b"d@test.local").hexdigest()[:12]
 
-    # D's referral link uses the product URL + their channel.
-    r = client.post(f"/api/products/{product['id']}/link", headers=auth(d_token))
+    # D's referral link is auto-generated the moment the dashboard loads.
+    r = client.get("/api/products", headers=auth(d_token))
     assert r.status_code == 200, r.text
-    d_link = r.json()
+    d_link = r.json()[0]["link"]
     assert d_link["referral_url"] == f"https://getmeridian.tech?channel={d['user']['affiliate_id']}"
-
-    # Tracking hop works per product.
-    r = client.get(f"/r/{product['id']}/{d_link['slug']}", follow_redirects=False)
-    assert r.status_code == 302
-    assert f"channel={d_link['slug']}" in r.headers["location"]
 
     wh = f"/api/webhooks/meridian/{product['id']}"
     secret = product["webhook_secret"].encode()
@@ -152,8 +147,7 @@ def test_full_flow(client, admin_token):
     assert res["commissions"] == []
 
     # Direct child of admin converts → keeps the full payable.
-    r = client.post(f"/api/products/{product['id']}/link", headers=auth(b_token))
-    b_link = r.json()
+    b_link = client.post(f"/api/products/{product['id']}/link", headers=auth(b_token)).json()
     res = fire(b_link["slug"], "signed_up", {"email": "u2@x.in", "name": "U Two"})
     assert res["commissions"] == [
         {"user_id": b["user"]["id"], "amount": 300.0, "type": "signed_up"}
@@ -207,10 +201,18 @@ def test_webhook_rejects_bad_signature(client, admin_token):
     assert r.status_code == 401
 
 
-def test_webhook_settings_admin_only(client, admin_token):
-    # Affiliates must not see webhook configuration at all.
+def test_new_product_assigned_to_whole_network(client, admin_token):
+    """A product created after affiliates joined is promoted by all of them."""
+    r = client.post(
+        "/api/admin/products",
+        json={"name": "Second Launch", "url": "https://second.example.com"},
+        headers=auth(admin_token),
+    )
+    assert r.status_code == 200, r.text
     b_token = login(client, "b@test.local", "pass1234")
-    r = client.get("/api/webhook-settings", headers=auth(b_token))
-    assert r.status_code == 403
-    r = client.get("/api/webhook-settings", headers=auth(admin_token))
-    assert r.status_code == 200
+    r = client.get("/api/products", headers=auth(b_token))
+    names = {p["name"] for p in r.json()}
+    assert "Second Launch" in names
+    # And the link is already generated with B's channel.
+    second = next(p for p in r.json() if p["name"] == "Second Launch")
+    assert "channel=" in second["link"]["referral_url"]

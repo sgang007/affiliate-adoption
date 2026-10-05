@@ -222,23 +222,3 @@ class PayoutRequest(Base):
     paid_at = Column(DateTime, nullable=True)
 
     user = relationship("User")
-
-
-class WebhookEndpoint(Base):
-    """Admin-configured outbound callback: forward processed funnel events to
-    an external system (CRM, Slack bridge, data warehouse)."""
-
-    __tablename__ = "webhook_endpoints"
-
-    id = Column(Integer, primary_key=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    product_id = Column(Integer, ForeignKey("products.id"), nullable=True)  # null = all
-    event_type = Column(String(40), default="all")  # all | visited | signed_up | trial | subscribed
-    url = Column(String(1024), nullable=False)
-    format = Column(String(20), default="json")  # json | form
-    secret = Column(String(64), default=gen_secret)
-    is_active = Column(Boolean, default=True)
-    created_at = Column(DateTime, default=utcnow)
-
-    user = relationship("User")
-    product = relationship("Product")

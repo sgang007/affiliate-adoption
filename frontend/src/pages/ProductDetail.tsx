@@ -34,10 +34,7 @@ export default function ProductDetail() {
               cookied on every visit, so you get credit for signups, trials and subscriptions —
               whenever they happen.
             </p>
-            <div className="space-y-4">
-              <CopyField label="Referral link (direct to product)" value={product.link.referral_url} />
-              <CopyField label="Tracked link (counts visits via the portal)" value={product.link.tracking_url} />
-            </div>
+            <CopyField value={product.link.referral_url} />
           </div>
 
           {/* Referred users */}

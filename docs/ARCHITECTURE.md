@@ -9,7 +9,7 @@
 | **Tracking & Attribution** | referral links, channel slugs, visits, referred users, funnel status | `models.AffiliateLink/ReferredUser/Event`, `routers/webhooks_in.py`, `services/slugs.py` |
 | **Commissions** | the cascade engine — the heart of the domain | `services/commission.py`, `models.Commission` |
 | **Billing & Payouts** | monthly bills, submission, payout cycles | `services/payout.py`, `models.Invoice`, `routers/invoices.py` |
-| **Integrations** | inbound Meridian webhooks, outbound affiliate callbacks, email | `services/dispatcher.py`, `services/emailer.py` |
+| **Integrations** | inbound product webhooks, transactional email (Resend/SMTP) | `routers/webhooks_in.py`, `services/emailer.py` |
 
 ## Layering (dependency rule: outer → inner only)
 
@@ -26,8 +26,8 @@ Persistence (SQLAlchemy models, Session)      ← infrastructure
   shape the response. No business rules live in HTTP handlers.
 - Domain services raise plain Python errors (`ValueError`, `LookupError`);
   routers translate them to HTTP codes — the domain never knows about HTTP.
-- Side effects are separated from decisions: `dispatcher.build_deliveries`
-  (pure, testable) vs `dispatcher.send_deliveries` (I/O, fire-and-forget).
+- Side effects (email) run post-response via `BackgroundTasks` and never
+  fail the request that triggered them.
 
 ## SOLID mapping
 
@@ -70,10 +70,9 @@ Persistence (SQLAlchemy models, Session)      ← infrastructure
   so Azure Functions scales instances horizontally on demand; sqlite is only
   a dev convenience, production uses Azure Database for PostgreSQL
   (add PgBouncer / `pool_pre_ping` is already on).
-- Webhook ingestion is the hot path: one indexed slug lookup + a handful of
-  inserts; outbound callbacks run post-response via `BackgroundTasks`. At
-  higher volumes, swap `send_deliveries` for an Azure Storage Queue +
-  queue-triggered function (same `function_app.py` can host it) without
-  touching the domain.
+- Webhook ingestion is the hot path: one indexed channel lookup + a handful
+  of inserts, all synchronous and idempotent. At higher volumes, front it
+  with an Azure Storage Queue + queue-triggered function (same
+  `function_app.py` can host it) without touching the domain.
 - Monthly payout runs are O(submitted invoices) and idempotent; they can be
   moved to a timer-triggered function for automation.

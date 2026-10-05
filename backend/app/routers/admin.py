@@ -17,7 +17,7 @@ from ..models import (
     User,
     gen_secret,
 )
-from ..schemas import AssignIn, ProductIn, ProductUpdate, RulesIn, UserCreateIn
+from ..schemas import ProductIn, ProductUpdate, RulesIn, UserCreateIn
 from ..security import hash_password
 from ..services.emailer import send_payout_processed
 from ..services.identity import assign_affiliate_id
@@ -79,8 +79,12 @@ def create_product(
     # Sensible starter rules — fully editable from the console.
     for r in DEFAULT_RULES:
         db.add(IncentiveRule(product_id=product.id, **r))
-    # The creating admin is the root of this product's network.
+    # The creating admin is the root of this product's network, and everyone
+    # already in their network starts promoting it immediately. Later joiners
+    # inherit assignments from their inviter at signup.
     db.add(ProductAssignment(product_id=product.id, user_id=admin.id))
+    for u in db.query(User).filter(User.path.like(f"{admin.path}/%")).all():
+        db.add(ProductAssignment(product_id=product.id, user_id=u.id))
     db.commit()
     db.refresh(product)
     return product_out(product)
@@ -154,24 +158,6 @@ def get_integration_prompt(product_id: int, db: Session = Depends(get_db)):
         raise HTTPException(404, "Product not found")
     url = f"{settings.portal_base_url}/api/webhooks/meridian/{product.id}"
     return {"prompt": integration_prompt(product, url)}
-
-
-@router.post("/products/{product_id}/assign")
-def assign_product(product_id: int, body: AssignIn, db: Session = Depends(get_db)):
-    if not db.get(Product, product_id):
-        raise HTTPException(404, "Product not found")
-    if not db.get(User, body.user_id):
-        raise HTTPException(404, "User not found")
-    existing = (
-        db.query(ProductAssignment)
-        .filter_by(product_id=product_id, user_id=body.user_id)
-        .first()
-    )
-    if existing:
-        return {"ok": True, "already_assigned": True}
-    db.add(ProductAssignment(product_id=product_id, user_id=body.user_id))
-    db.commit()
-    return {"ok": True}
 
 
 @router.post("/users")

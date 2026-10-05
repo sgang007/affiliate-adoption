@@ -48,10 +48,6 @@ class UserCreateIn(BaseModel):
     password: str
 
 
-class AssignIn(BaseModel):
-    user_id: int
-
-
 class InviteIn(BaseModel):
     email: str
 
@@ -61,20 +57,6 @@ class PayoutRequestIn(BaseModel):
     bank_account: str | None = None
     ifsc: str | None = None
     account_name: str | None = None
-
-
-class WebhookSettingIn(BaseModel):
-    url: str
-    event_type: str = "all"
-    format: str = "json"
-    product_id: int | None = None
-
-
-class WebhookSettingUpdate(BaseModel):
-    url: str | None = None
-    event_type: str | None = None
-    format: str | None = None
-    is_active: bool | None = None
 
 
 class ProductEvent(BaseModel):

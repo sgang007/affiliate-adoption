@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api, inr } from '../api'
 import Layout from '../components/Layout'
-import { Empty, Funnel, Stat } from '../components/ui'
+import { CopyField, Empty, Funnel, Stat } from '../components/ui'
 import { rankFor, xpFrom } from '../gamify'
 
 export default function Dashboard() {
@@ -20,6 +20,25 @@ export default function Dashboard() {
 
   return (
     <Layout title="Dashboard">
+      {/* Referral links — the first thing to see and share */}
+      {products.length > 0 && (
+        <div className="card mb-6 border-mint/30 p-6 shadow-glow rise">
+          <h2 className="font-display text-lg font-semibold">
+            🔗 Your referral link{products.length > 1 ? 's' : ''} — share to earn
+          </h2>
+          <p className="mb-5 mt-1 text-sm text-fog">
+            Send this link to your network. Every signup, trial and subscription that comes
+            through it pays you automatically — and when you recruit affiliates from{' '}
+            <Link to="/team" className="text-mint">My Team</Link>, their conversions earn you a
+            cut too.
+          </p>
+          <div className="space-y-4">
+            {products.map((p) => (
+              <CopyField key={p.id} label={p.name} value={p.link.referral_url} />
+            ))}
+          </div>
+        </div>
+      )}
       {/* Rank banner */}
       <div className="card mb-6 flex flex-col gap-5 p-6 shadow-glow md:flex-row md:items-center rise">
         <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl bg-mint/10 text-3xl">
@@ -89,15 +108,11 @@ export default function Dashboard() {
                   </span>
                 </div>
                 <p className="mt-1 line-clamp-2 text-sm text-fog">{p.description}</p>
-                {p.stats ? (
-                  <div className="mt-4 flex gap-4 text-sm">
-                    <span><b className="font-display">{p.stats.visits}</b> <span className="text-fog">visits</span></span>
-                    <span><b className="font-display">{p.stats.signed_up}</b> <span className="text-fog">signups</span></span>
-                    <span><b className="font-display text-leaf">{p.stats.subscribed}</b> <span className="text-fog">subs</span></span>
-                  </div>
-                ) : (
-                  <div className="mt-4 text-sm text-mint">Generate your referral link →</div>
-                )}
+                <div className="mt-4 flex gap-4 text-sm">
+                  <span><b className="font-display">{p.stats.visits}</b> <span className="text-fog">visits</span></span>
+                  <span><b className="font-display">{p.stats.signed_up}</b> <span className="text-fog">signups</span></span>
+                  <span><b className="font-display text-leaf">{p.stats.subscribed}</b> <span className="text-fog">subs</span></span>
+                </div>
               </Link>
             ))}
           </div>

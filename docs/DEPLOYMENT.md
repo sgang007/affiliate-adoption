@@ -85,6 +85,9 @@ For each product in the Admin console, copy the **webhook URL** and
   rotate `JWT_SECRET` via app settings (invalidates sessions).
 - **Monitoring:** Application Insights is enabled by default on the Function
   App; `host.json` already samples request telemetry.
-- **Email invites:** set `SMTP_HOST/SMTP_PORT/SMTP_USER/SMTP_PASSWORD/SMTP_FROM`
-  app settings (or use Azure Communication Services SMTP). Without SMTP the
-  invite link is still returned in the UI for manual sharing.
+- **Email (invites + payout confirmations):** set `RESEND_API_KEY` (and
+  `EMAIL_FROM` once your domain is verified in Resend — the default
+  `onboarding@resend.dev` sender only delivers to your own Resend account
+  email). SMTP works as a fallback via `SMTP_HOST/SMTP_PORT/SMTP_USER/
+  SMTP_PASSWORD`. With neither configured, invite links are still shown in
+  the UI for manual sharing.
