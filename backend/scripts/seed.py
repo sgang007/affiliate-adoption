@@ -1,5 +1,11 @@
-"""Seed demo data: admin, a Meridian product, a 3-level affiliate network and
-a realistic stream of funnel events so every dashboard has something to show.
+"""Seed demo data for the admin-rooted network:
+
+  admin (root, earns nothing)
+    └─ Ananya
+         ├─ Rohan ── Kabir
+         └─ Priya
+
+plus a realistic event stream so every dashboard has data.
 
 Run from backend/:  python -m scripts.seed
 """
@@ -9,15 +15,23 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.database import SessionLocal, init_db  # noqa: E402
-from app.models import AffiliateLink, Product, ProductAssignment, User  # noqa: E402
+from app.models import (  # noqa: E402
+    AffiliateLink,
+    IncentiveRule,
+    Product,
+    ProductAssignment,
+    User,
+)
+from app.routers.admin import DEFAULT_RULES  # noqa: E402
 from app.security import hash_password  # noqa: E402
-from app.services.commission import process_meridian_event  # noqa: E402
-from app.services.slugs import make_slug  # noqa: E402
+from app.services.commission import process_product_event  # noqa: E402
+from app.services.identity import assign_affiliate_id  # noqa: E402
+from app.services.templates import default_event_templates  # noqa: E402
 
 DEMO_PASSWORD = "demo123"
 
 
-def get_or_create_user(db, email, name, parent=None):
+def get_or_create_user(db, email, name, parent):
     user = db.query(User).filter(User.email == email).first()
     if user:
         return user
@@ -26,11 +40,12 @@ def get_or_create_user(db, email, name, parent=None):
         name=name,
         hashed_password=hash_password(DEMO_PASSWORD),
         role="affiliate",
-        parent_id=parent.id if parent else None,
+        parent_id=parent.id,
+        affiliate_id=assign_affiliate_id(db, email),
     )
     db.add(user)
     db.flush()
-    user.path = f"{parent.path}/{user.id}" if parent else str(user.id)
+    user.path = f"{parent.path}/{user.id}"
     db.commit()
     return user
 
@@ -44,7 +59,7 @@ def assign(db, product, user):
 def link_for(db, product, user):
     link = db.query(AffiliateLink).filter_by(product_id=product.id, user_id=user.id).first()
     if not link:
-        link = AffiliateLink(product_id=product.id, user_id=user.id, slug=make_slug(user.path))
+        link = AffiliateLink(product_id=product.id, user_id=user.id, slug=user.affiliate_id)
         db.add(link)
         db.commit()
     return link
@@ -62,71 +77,102 @@ def main():
             name="Meridian",
             description="Product intelligence engine for aspiring and ideating entrepreneurs — "
             "validate ideas, find your market, and launch faster.",
-            url="https://meridian.example.com",
-            price=1800,
-            signup_commission=100,
-            trial_commission=300,
-            subscription_pct=20,
+            url="https://getmeridian.tech",
+            price=2000,
+            network_commission_pct=20,
+            event_templates=default_event_templates(),
             created_by=admin.id,
         )
         db.add(product)
+        db.flush()
+        for r in DEFAULT_RULES:
+            db.add(IncentiveRule(product_id=product.id, **r))
         db.commit()
+    assign(db, product, admin)
 
-    # 3-level network: Ananya → Rohan & Priya → Kabir (under Rohan)
-    ananya = get_or_create_user(db, "ananya@demo.in", "Ananya Sharma")
+    # Network: admin → Ananya → {Rohan → Kabir, Priya}
+    ananya = get_or_create_user(db, "ananya@demo.in", "Ananya Sharma", parent=admin)
     rohan = get_or_create_user(db, "rohan@demo.in", "Rohan Mehta", parent=ananya)
     priya = get_or_create_user(db, "priya@demo.in", "Priya Nair", parent=ananya)
     kabir = get_or_create_user(db, "kabir@demo.in", "Kabir Singh", parent=rohan)
 
-    for u in (ananya, rohan, priya, kabir):
+    affiliates = (ananya, rohan, priya, kabir)
+    for u in affiliates:
         assign(db, product, u)
+    links = {u.id: link_for(db, product, u) for u in affiliates}
 
-    links = {u.id: link_for(db, product, u) for u in (ananya, rohan, priya, kabir)}
-
-    def fire(user, event, ext_id, email=None, amount=None):
-        process_meridian_event(
-            db, product, event, links[user.id].slug, ext_id, email=email, amount=amount
+    def fire(user, event, params, user_id=None):
+        process_product_event(
+            db,
+            product,
+            channel=links[user.id].slug,
+            event_raw=event,
+            payload={"channel": links[user.id].slug, "event": event,
+                     "user_id": user_id, "params": params},
         )
 
-    # Only seed events once.
     if links[ananya.id].visits == 0:
-        # Ananya's direct funnel
+        def visit(user, uid):
+            fire(user, "visited",
+                 {"user_info": "en-IN", "location": "Bengaluru, IN", "device_type": "mobile"},
+                 user_id=uid)
+
+        def signup(user, uid, email, name):
+            fire(user, "signed_up",
+                 {"email": email, "name": name, "job_role": "Founder", "industry": "SaaS"},
+                 user_id=uid)
+
+        def trial(user, uid, email, name):
+            fire(user, "trial",
+                 {"email": email, "name": name, "credits_granted": 1000,
+                  "trial_duration": "unlimited"},
+                 user_id=uid)
+
+        def subscribe(user, uid, email, name, amount="2000"):
+            fire(user, "subscribed",
+                 {"email": email, "name": name, "plan": "Founder-Starter",
+                  "subscription": amount, "frequency": "monthly"},
+                 user_id=uid)
+
+        # Ananya (direct child of admin — keeps the remainder on her own sales)
         for i in range(14):
-            fire(ananya, "visited", f"a-visitor-{i}")
+            visit(ananya, f"a-{i}")
         for i in range(6):
-            fire(ananya, "signed_up", f"a-visitor-{i}", email=f"founder{i}@startups.in")
+            signup(ananya, f"a-{i}", f"founder{i}@startups.in", f"Founder {i}")
         for i in range(3):
-            fire(ananya, "trial_started", f"a-visitor-{i}")
-        fire(ananya, "subscribed", "a-visitor-0", amount=1800)
-        fire(ananya, "subscribed", "a-visitor-1", amount=1800)
+            trial(ananya, f"a-{i}", f"founder{i}@startups.in", f"Founder {i}")
+        subscribe(ananya, "a-0", "founder0@startups.in", "Founder 0")
+        subscribe(ananya, "a-1", "founder1@startups.in", "Founder 1")
 
-        # Rohan's funnel (Ananya earns overrides)
+        # Rohan (Ananya takes 20% network commission)
         for i in range(9):
-            fire(rohan, "visited", f"r-visitor-{i}")
+            visit(rohan, f"r-{i}")
         for i in range(4):
-            fire(rohan, "signed_up", f"r-visitor-{i}", email=f"builder{i}@ideas.in")
+            signup(rohan, f"r-{i}", f"builder{i}@ideas.in", f"Builder {i}")
         for i in range(2):
-            fire(rohan, "trial_started", f"r-visitor-{i}")
-        fire(rohan, "subscribed", "r-visitor-0", amount=1800)
+            trial(rohan, f"r-{i}", f"builder{i}@ideas.in", f"Builder {i}")
+        subscribe(rohan, "r-0", "builder0@ideas.in", "Builder 0")
 
-        # Priya's funnel
+        # Priya
         for i in range(7):
-            fire(priya, "visited", f"p-visitor-{i}")
+            visit(priya, f"p-{i}")
         for i in range(3):
-            fire(priya, "signed_up", f"p-visitor-{i}", email=f"maker{i}@dreamers.in")
-        fire(priya, "trial_started", "p-visitor-0")
+            signup(priya, f"p-{i}", f"maker{i}@dreamers.in", f"Maker {i}")
+        trial(priya, "p-0", "maker0@dreamers.in", "Maker 0")
 
-        # Kabir's funnel (Rohan and Ananya both earn overrides)
+        # Kabir (Ananya and Rohan both take network commission above him)
         for i in range(5):
-            fire(kabir, "visited", f"k-visitor-{i}")
+            visit(kabir, f"k-{i}")
         for i in range(2):
-            fire(kabir, "signed_up", f"k-visitor-{i}", email=f"hustler{i}@garage.in")
-        fire(kabir, "trial_started", "k-visitor-0")
-        fire(kabir, "subscribed", "k-visitor-0", amount=1800)
+            signup(kabir, f"k-{i}", f"hustler{i}@garage.in", f"Hustler {i}")
+        trial(kabir, "k-0", "hustler0@garage.in", "Hustler 0")
+        subscribe(kabir, "k-0", "hustler0@garage.in", "Hustler 0")
 
     print("Seeded demo data.")
-    print(f"  Admin     : {admin.email} / admin123")
+    print(f"  Admin     : {admin.email} / admin123  (network root, earns nothing)")
     print(f"  Affiliates: ananya@demo.in, rohan@demo.in, priya@demo.in, kabir@demo.in / {DEMO_PASSWORD}")
+    for u in affiliates:
+        print(f"    {u.name:<14} channel={u.affiliate_id}")
     print(f"  Product   : {product.name} (id={product.id})")
     print(f"  Webhook   : POST /api/webhooks/meridian/{product.id}  secret={product.webhook_secret}")
     db.close()

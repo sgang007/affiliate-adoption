@@ -37,6 +37,8 @@ def init_db() -> None:
 
     Base.metadata.create_all(bind=engine)
 
+    from .services.identity import assign_affiliate_id
+
     db = SessionLocal()
     try:
         admin = db.query(models.User).filter(models.User.role == "admin").first()
@@ -46,6 +48,7 @@ def init_db() -> None:
                 name=settings.admin_name,
                 hashed_password=hash_password(settings.admin_password),
                 role="admin",
+                affiliate_id=assign_affiliate_id(db, settings.admin_email),
             )
             db.add(admin)
             db.flush()

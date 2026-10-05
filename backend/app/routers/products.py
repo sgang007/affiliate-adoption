@@ -6,6 +6,7 @@ from ..config import get_settings
 from ..database import get_db
 from ..deps import get_current_user
 from ..models import (
+    EVENT_KINDS,
     AffiliateLink,
     Commission,
     Product,
@@ -13,7 +14,6 @@ from ..models import (
     ReferredUser,
     User,
 )
-from ..services.slugs import make_slug
 
 router = APIRouter(prefix="/api/products", tags=["products"])
 settings = get_settings()
@@ -38,7 +38,7 @@ def _get_or_create_link(db: Session, user: User, product: Product) -> AffiliateL
         db.query(AffiliateLink).filter_by(product_id=product.id, user_id=user.id).first()
     )
     if not link:
-        link = AffiliateLink(product_id=product.id, user_id=user.id, slug=make_slug(user.path))
+        link = AffiliateLink(product_id=product.id, user_id=user.id, slug=user.affiliate_id)
         db.add(link)
         db.commit()
         db.refresh(link)
@@ -77,7 +77,30 @@ def _link_out(link: AffiliateLink, product: Product) -> dict:
         "id": link.id,
         "slug": link.slug,
         "referral_url": f"{product.url}{sep}channel={link.slug}",
-        "tracking_url": f"{settings.portal_base_url}/r/{link.slug}",
+        "tracking_url": f"{settings.portal_base_url}/r/{product.id}/{link.slug}",
+    }
+
+
+def _rules_out(product: Product) -> list[dict]:
+    return [
+        {"event": r.event, "type": r.type, "value": float(r.value or 0), "field": r.field}
+        for r in sorted(
+            product.rules, key=lambda r: EVENT_KINDS.index(r.event) if r.event in EVENT_KINDS else 99
+        )
+        if r.is_active
+    ]
+
+
+def _product_base(p: Product) -> dict:
+    return {
+        "id": p.id,
+        "name": p.name,
+        "description": p.description,
+        "url": p.url,
+        "currency": p.currency,
+        "price": float(p.price or 0),
+        "network_commission_pct": float(p.network_commission_pct or 0),
+        "rules": _rules_out(p),
     }
 
 
@@ -92,19 +115,9 @@ def my_products(user: User = Depends(get_current_user), db: Session = Depends(ge
         link = (
             db.query(AffiliateLink).filter_by(product_id=p.id, user_id=user.id).first()
         )
-        item = {
-            "id": p.id,
-            "name": p.name,
-            "description": p.description,
-            "url": p.url,
-            "currency": p.currency,
-            "price": float(p.price or 0),
-            "signup_commission": float(p.signup_commission or 0),
-            "trial_commission": float(p.trial_commission or 0),
-            "subscription_pct": float(p.subscription_pct or 0),
-            "link": _link_out(link, p) if link else None,
-            "stats": _link_stats(db, link) if link else None,
-        }
+        item = _product_base(p)
+        item["link"] = _link_out(link, p) if link else None
+        item["stats"] = _link_stats(db, link) if link else None
         out.append(item)
     return out
 
@@ -115,19 +128,10 @@ def product_detail(
 ):
     product = _assigned_product(db, user, product_id)
     link = _get_or_create_link(db, user, product)
-    return {
-        "id": product.id,
-        "name": product.name,
-        "description": product.description,
-        "url": product.url,
-        "currency": product.currency,
-        "price": float(product.price or 0),
-        "signup_commission": float(product.signup_commission or 0),
-        "trial_commission": float(product.trial_commission or 0),
-        "subscription_pct": float(product.subscription_pct or 0),
-        "link": _link_out(link, product),
-        "stats": _link_stats(db, link),
-    }
+    item = _product_base(product)
+    item["link"] = _link_out(link, product)
+    item["stats"] = _link_stats(db, link)
+    return item
 
 
 @router.post("/{product_id}/link")
@@ -162,8 +166,10 @@ def product_referrals(
             "id": r.id,
             "external_id": r.external_id,
             "email": r.email,
+            "name": (r.meta or {}).get("name"),
             "status": r.status,
             "subscription_amount": float(r.subscription_amount or 0),
+            "meta": r.meta or {},
             "earned": float(earned_by_ru.get(r.id, 0) or 0),
             "first_seen": r.created_at.isoformat(),
             "last_update": r.updated_at.isoformat() if r.updated_at else None,

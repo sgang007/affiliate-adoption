@@ -82,7 +82,10 @@ export default function Dashboard() {
                     {p.name}
                   </div>
                   <span className="shrink-0 rounded-full bg-gold/15 px-2.5 py-0.5 text-xs font-semibold text-gold">
-                    {p.subscription_pct}% rec.
+                    {(() => {
+                      const sub = p.rules?.find((r: any) => r.event === 'subscribed' && r.value > 0)
+                      return sub ? (sub.type === 'commission' ? `${sub.value}% rec.` : `₹${sub.value}/sub`) : 'earn ₹'
+                    })()}
                   </span>
                 </div>
                 <p className="mt-1 line-clamp-2 text-sm text-fog">{p.description}</p>

@@ -7,6 +7,7 @@ from sqlalchemy import (
     Column,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     Numeric,
     String,
@@ -34,11 +35,12 @@ class User(Base):
     name = Column(String(255), nullable=False)
     hashed_password = Column(String(255), nullable=False)
     role = Column(String(20), default="affiliate", nullable=False)  # admin | affiliate
+    # Hex hash of the email — this IS the ?channel= value in referral links.
+    affiliate_id = Column(String(32), unique=True, index=True, nullable=False)
     parent_id = Column(Integer, ForeignKey("users.id"), nullable=True)
-    # Materialized path from root to self, e.g. "3/7/12". Encodes the full
-    # ancestor chain used for commission cascades and referral slugs.
+    # Materialized path from the network root (an admin) to self, e.g. "1/4/9".
     path = Column(String(1024), default="", index=True)
-    payout_details = Column(JSON, default=dict)  # {"upi": ..., "bank": ...}
+    payout_details = Column(JSON, default=dict)  # {"upi": ..., "bank_account": ...}
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=utcnow)
 
@@ -74,15 +76,43 @@ class Product(Base):
     description = Column(Text, default="")
     url = Column(String(1024), nullable=False)
     currency = Column(String(8), default="INR")
-    # Monthly subscription price (fallback when a webhook omits the amount).
+    # Display/fallback monthly price (payouts come from incentive rules).
     price = Column(Numeric(12, 2), default=0)
-    signup_commission = Column(Numeric(12, 2), default=100)
-    trial_commission = Column(Numeric(12, 2), default=300)
-    subscription_pct = Column(Numeric(5, 2), default=20)
-    # Shared secret Meridian uses to sign inbound webhook payloads.
+    # % each ancestor (below the admin root) takes from the running pool.
+    network_commission_pct = Column(Numeric(5, 2), default=20)
+    # Admin-editable example message per event: {"visited": {...}, ...}
+    event_templates = Column(JSON, default=dict)
+    # Shared secret the product uses to sign inbound webhook payloads.
     webhook_secret = Column(String(64), default=gen_secret)
     is_active = Column(Boolean, default=True)
     created_by = Column(Integer, ForeignKey("users.id"))
+    created_at = Column(DateTime, default=utcnow)
+
+    rules = relationship("IncentiveRule", backref="product", cascade="all, delete-orphan")
+
+
+EVENT_KINDS = ["visited", "signed_up", "trial", "subscribed"]
+
+
+class IncentiveRule(Base):
+    """Admin-defined payout rule for one event type of a product.
+
+    type "flat"       → value is the payable amount in product currency.
+    type "commission" → value is a %, applied to the payload field named in
+                        `field` (dot path into the message, e.g.
+                        "params.subscription").
+    """
+
+    __tablename__ = "incentive_rules"
+    __table_args__ = (UniqueConstraint("product_id", "event", name="uq_rule_event"),)
+
+    id = Column(Integer, primary_key=True)
+    product_id = Column(Integer, ForeignKey("products.id"), nullable=False)
+    event = Column(String(20), nullable=False)  # visited | signed_up | trial | subscribed
+    type = Column(String(20), default="flat")  # flat | commission
+    value = Column(Numeric(12, 2), default=0)
+    field = Column(String(255), nullable=True)  # payload dot-path for commission type
+    is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=utcnow)
 
 
@@ -100,15 +130,19 @@ class ProductAssignment(Base):
 
 
 class AffiliateLink(Base):
+    """Per (product, user) tracking record. The channel is the owner's
+    affiliate_id, so one channel identifies the affiliate on every product."""
+
     __tablename__ = "affiliate_links"
-    __table_args__ = (UniqueConstraint("product_id", "user_id", name="uq_link"),)
+    __table_args__ = (
+        UniqueConstraint("product_id", "user_id", name="uq_link"),
+        Index("ix_link_channel", "product_id", "slug"),
+    )
 
     id = Column(Integer, primary_key=True)
     product_id = Column(Integer, ForeignKey("products.id"), nullable=False)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    # channel slug: base36-encoded ancestor chain + random suffix,
-    # e.g. "1-4-9~k3f7" → encodes the affiliate and all parents.
-    slug = Column(String(255), unique=True, index=True, nullable=False)
+    slug = Column(String(64), index=True, nullable=False)  # == user.affiliate_id
     visits = Column(Integer, default=0)
     created_at = Column(DateTime, default=utcnow)
 
@@ -125,10 +159,11 @@ class ReferredUser(Base):
 
     id = Column(Integer, primary_key=True)
     link_id = Column(Integer, ForeignKey("affiliate_links.id"), nullable=False)
-    external_id = Column(String(255), nullable=False)  # Meridian user id
+    external_id = Column(String(255), nullable=False)
     email = Column(String(255), nullable=True)
     status = Column(String(20), default="visited")
     subscription_amount = Column(Numeric(12, 2), nullable=True)
+    meta = Column(JSON, default=dict)  # latest params: name, plan, device, …
     created_at = Column(DateTime, default=utcnow)
     updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
 
@@ -147,21 +182,24 @@ class Event(Base):
 
 
 class Commission(Base):
+    """Ledger entry. Every payable event appends immutable rows here; payout
+    requests move them pending → requested → paid."""
+
     __tablename__ = "commissions"
 
     id = Column(Integer, primary_key=True)
     user_id = Column(Integer, ForeignKey("users.id"), index=True, nullable=False)  # earner
-    # Affiliate whose link converted. When == user_id it's a direct
-    # commission; otherwise it's a network override earned from a descendant.
+    # Affiliate whose channel converted; == user_id for the converter's own
+    # share, different for network-override shares up the branch.
     source_user_id = Column(Integer, ForeignKey("users.id"), index=True, nullable=False)
     referred_user_id = Column(Integer, ForeignKey("referred_users.id"), nullable=True)
     product_id = Column(Integer, ForeignKey("products.id"), nullable=False)
     event_id = Column(Integer, ForeignKey("events.id"), nullable=True)
-    event_type = Column(String(40), nullable=False)  # signup | trial | subscription | subscription_renewal
+    event_type = Column(String(40), nullable=False)  # signed_up | trial | subscribed
     amount = Column(Numeric(12, 2), nullable=False)
     period = Column(String(7), index=True, nullable=False)  # YYYY-MM
-    status = Column(String(20), default="pending")  # pending | invoiced | paid
-    invoice_id = Column(Integer, ForeignKey("invoices.id"), nullable=True)
+    status = Column(String(20), default="pending")  # pending | requested | paid
+    payout_request_id = Column(Integer, ForeignKey("payout_requests.id"), nullable=True)
     created_at = Column(DateTime, default=utcnow)
 
     user = relationship("User", foreign_keys=[user_id])
@@ -170,32 +208,31 @@ class Commission(Base):
     referred_user = relationship("ReferredUser")
 
 
-class Invoice(Base):
-    __tablename__ = "invoices"
-    __table_args__ = (UniqueConstraint("user_id", "period", name="uq_invoice_period"),)
+class PayoutRequest(Base):
+    __tablename__ = "payout_requests"
 
     id = Column(Integer, primary_key=True)
     number = Column(String(40), unique=True, nullable=False)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    period = Column(String(7), nullable=False)
-    total_amount = Column(Numeric(12, 2), default=0)
-    status = Column(String(20), default="draft")  # draft | submitted | paid
+    amount = Column(Numeric(12, 2), nullable=False)
+    bank_details = Column(JSON, default=dict)  # {"upi"| "bank_account","ifsc","account_name"}
+    status = Column(String(20), default="requested")  # requested | approved | paid
     created_at = Column(DateTime, default=utcnow)
-    submitted_at = Column(DateTime, nullable=True)
+    approved_at = Column(DateTime, nullable=True)
     paid_at = Column(DateTime, nullable=True)
 
     user = relationship("User")
 
 
 class WebhookEndpoint(Base):
-    """Outbound callback an affiliate (or admin, per product) configures to
-    receive visited / signed_up / trial / subscribed events."""
+    """Admin-configured outbound callback: forward processed funnel events to
+    an external system (CRM, Slack bridge, data warehouse)."""
 
     __tablename__ = "webhook_endpoints"
 
     id = Column(Integer, primary_key=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    product_id = Column(Integer, ForeignKey("products.id"), nullable=True)  # null = all products
+    product_id = Column(Integer, ForeignKey("products.id"), nullable=True)  # null = all
     event_type = Column(String(40), default="all")  # all | visited | signed_up | trial | subscribed
     url = Column(String(1024), nullable=False)
     format = Column(String(20), default="json")  # json | form

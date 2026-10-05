@@ -18,9 +18,7 @@ class ProductIn(BaseModel):
     url: str
     currency: str = "INR"
     price: float = 0
-    signup_commission: float = 100
-    trial_commission: float = 300
-    subscription_pct: float = 20
+    network_commission_pct: float = 20
 
 
 class ProductUpdate(BaseModel):
@@ -28,10 +26,16 @@ class ProductUpdate(BaseModel):
     description: str | None = None
     url: str | None = None
     price: float | None = None
-    signup_commission: float | None = None
-    trial_commission: float | None = None
-    subscription_pct: float | None = None
+    network_commission_pct: float | None = None
+    event_templates: dict | None = None
     is_active: bool | None = None
+
+
+class RuleIn(BaseModel):
+    event: str  # visited | signed_up | trial | subscribed
+    type: str = "flat"  # flat | commission
+    value: float = 0
+    field: str | None = None  # dot path for commission type, e.g. params.subscription
 
 
 class UserCreateIn(BaseModel):
@@ -48,14 +52,17 @@ class InviteIn(BaseModel):
     email: str
 
 
-class InvoiceGenerateIn(BaseModel):
-    period: str | None = None  # YYYY-MM, defaults to current month
+class PayoutRequestIn(BaseModel):
+    upi: str | None = None
+    bank_account: str | None = None
+    ifsc: str | None = None
+    account_name: str | None = None
 
 
 class WebhookSettingIn(BaseModel):
     url: str
-    event_type: str = "all"  # all | visited | signed_up | trial | subscribed
-    format: str = "json"  # json | form
+    event_type: str = "all"
+    format: str = "json"
     product_id: int | None = None
 
 
@@ -66,19 +73,10 @@ class WebhookSettingUpdate(BaseModel):
     is_active: bool | None = None
 
 
-class PayoutDetailsIn(BaseModel):
-    upi: str | None = None
-    bank_account: str | None = None
-    ifsc: str | None = None
-    account_name: str | None = None
+class ProductEvent(BaseModel):
+    """Inbound webhook message: {channel, event, params}."""
 
-
-class MeridianEvent(BaseModel):
-    """Inbound payload from Meridian's product intelligence engine."""
-
-    event: str  # visited | signed_up | trial_started | subscribed | subscription_renewed | subscription_cancelled
-    channel: str  # the ?channel= slug from the referral link
-    user_id: str = ""  # Meridian's id for the end user
-    email: str | None = None
-    amount: float | None = None  # subscription amount for subscribed/renewed
-    timestamp: str | None = None
+    channel: str
+    event: str
+    params: dict = {}
+    user_id: str | None = None  # optional stable end-user id; params.email is the fallback

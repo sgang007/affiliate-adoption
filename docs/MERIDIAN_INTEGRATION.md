@@ -1,30 +1,35 @@
-# Integrating Meridian's Product Intelligence Engine
+# Integrating a product (Meridian's Product Intelligence Engine)
 
-The portal and Meridian talk in both directions:
+> The Admin console generates a complete, product-specific version of this
+> document: **Admin → product → ⚡ Integration prompt**. It embeds the real
+> webhook URL, signing secret, current message templates and rules — paste it
+> into the product's codebase or hand it to an AI coding agent.
 
-1. **Attribution (Meridian → user's browser):** every referral link carries
-   `?channel=<slug>`. Meridian must persist that value (cookie
-   `channel`, 90 days) on first touch and attach it to every lifecycle event
-   for that end user.
-2. **Events (Meridian → portal):** Meridian POSTs funnel events to the
-   product's webhook URL.
-3. **Callbacks (portal → affiliates):** the portal fans events out to each
-   affiliate's own configured endpoints, in their chosen format.
+The portal and the product talk in both directions:
 
-## 1. The referral link
+1. **Attribution:** referral links carry `?channel=<affiliate-id>`. The
+   product cookies that value (90 days, first-touch) and stamps it onto the
+   user record at signup as `referrer_id`.
+2. **Events (product → portal):** the product POSTs lifecycle messages to
+   the product's webhook URL.
+3. **Callbacks (portal → admin systems):** optionally, the portal forwards
+   processed events to admin-configured endpoints (JSON or form, signed).
 
-Each affiliate gets, per product:
+## 1. Affiliate identity and referral links
 
-| Link | Example | Use |
-|---|---|---|
-| Referral link | `https://meridian.example.com?channel=1-4-9~x7kq` | direct share |
-| Tracked link | `https://<portal>/r/1-4-9~x7kq` | counts the visit in the portal, sets the `channel` cookie, 302-redirects to the referral link |
+Every affiliate's channel id is a **hex hash of their email** (e.g.
+`das232edads`) — one id across all products. Links:
 
-The slug encodes the affiliate's id **and every parent** in their network
-(base36 ids joined by `-`, plus a random suffix), e.g. `1-4-9~x7kq` means
-user 9, recruited by 4, whose network root is 1.
+| Link | Example |
+|---|---|
+| Referral link | `https://getmeridian.tech?channel=94825aa6b280` |
+| Tracked hop (optional, counts the visit portal-side) | `https://<portal>/r/<product_id>/94825aa6b280` |
 
-## 2. Inbound webhook (Meridian → portal)
+The product must add a `referrer_id` column to its user table: copy the
+`channel` cookie into it at signup, then send it as `channel` on **every**
+subsequent event that user generates.
+
+## 2. Inbound webhook (product → portal)
 
 ```
 POST {PORTAL_BASE_URL}/api/webhooks/meridian/{product_id}
@@ -32,78 +37,83 @@ Content-Type: application/json
 X-Meridian-Signature: hex(HMAC_SHA256(webhook_secret, raw_body))
 ```
 
-The `webhook_secret` is shown in the Admin console per product (rotate with
-`POST /api/admin/products/{id}/rotate-secret`).
-
-Body:
+Message format — `{channel, event, params}`:
 
 ```json
 {
-  "event": "signed_up",
-  "channel": "1-4-9~x7kq",
-  "user_id": "mrd_8f2k1",
-  "email": "founder@startup.in",
-  "amount": 1800,
-  "timestamp": "2026-10-04T10:21:00Z"
+  "channel": "das232edads",
+  "event": "subscribed",
+  "params": {
+    "email": "shubho@getmeridian.tech",
+    "name": "Shubhojyoti Ganguly",
+    "plan": "Founder-Starter",
+    "subscription": "2000",
+    "frequency": "monthly"
+  }
 }
 ```
 
-| `event` | When | `amount` | Commission |
-|---|---|---|---|
-| `visited` | first attributed visit | — | ₹0 (tracked) |
-| `signed_up` | account created | — | ₹100 (product-configurable) |
-| `trial_started` | trial begins | — | ₹300 (product-configurable) |
-| `subscribed` | first paid subscription | monthly price | 20% of amount |
-| `subscription_renewed` | every monthly renewal | monthly price | 20% of amount (one payout per referred user per month) |
-| `subscription_cancelled` | subscription ends | — | stops recurring income |
+Default params per event (admin-editable templates under **Event messages**):
 
-Signed-up / trial / first-subscription commissions are idempotent per
-referred user — replaying an event never double-pays.
+| `event` | `params` |
+|---|---|
+| `visited` | `user_info` (browser locale), `location`, `device_type` |
+| `signed_up` | `email`, `name`, `job_role`, `industry` |
+| `trial` | `name`, `email`, `credits_granted`, `trial_duration` |
+| `subscribed` | `email`, `name`, `plan`, `subscription`, `frequency` |
 
-### Example (curl)
+Aliases are accepted (`signed up`, `trial_started`, `subscription_renewed`,
+`cancelled`). Send `subscribed` on the first charge **and every renewal** —
+subscription payouts happen at most once per referred user per month, so the
+monthly re-send is what produces recurring affiliate income; it stops when
+you stop sending (or send `cancelled`). `signed_up`/`trial` never pay twice,
+so retries are always safe.
+
+## 3. Incentive rules (configured portal-side, no product code involved)
+
+Per event the admin sets one rule:
+
+```
+event: subscribed · type: flat | commission · value: 300 or 20
+field: params.subscription   (dot path into the message, commission type only)
+```
+
+The payable is computed from the rule, then distributed down the network.
+
+## 4. Network distribution (admin-rooted, cost-constant)
+
+- The **admin is the network root and earns nothing**.
+- The payable walks the branch **top-down from the admin's direct child to
+  the converting affiliate**: each intermediate level takes the product's
+  *network commission %* (default 20%) of the running pool; the converter
+  keeps the remainder.
+- Total paid always equals the computed payable.
+
+Example — `A(admin) → B → C → D`, user signs up via D's link, flat ₹300,
+20% network commission:
+
+| Member | Share |
+|---|---|
+| B (admin's direct child) | 20% × 300 = **₹60** |
+| C | 20% × 240 = **₹48** |
+| D (converter) | remainder = **₹192** |
+
+If B's own link converts, B keeps the full ₹300.
+
+## 5. Ledger and payouts
+
+Every share lands in the earner's ledger as `pending`. Affiliates request a
+payout (UPI or bank details) which freezes the balance into a payout
+request; the admin approves, pays manually, and marks it paid — the
+affiliate is notified by email.
+
+## Example (curl)
 
 ```bash
-BODY='{"event":"subscribed","channel":"1-4-9~x7kq","user_id":"mrd_8f2k1","amount":1800}'
+BODY='{"channel":"das232edads","event":"signed_up","params":{"email":"u@x.in","name":"U","job_role":"Founder","industry":"SaaS"}}'
 SIG=$(printf '%s' "$BODY" | openssl dgst -sha256 -hmac "$WEBHOOK_SECRET" | awk '{print $2}')
 curl -X POST "$PORTAL/api/webhooks/meridian/1" \
   -H "Content-Type: application/json" \
   -H "X-Meridian-Signature: $SIG" \
   -d "$BODY"
 ```
-
-## 3. Outbound callbacks (portal → affiliate endpoints)
-
-Affiliates configure endpoints under **Webhooks** (URL + event filter +
-format `json` or `form`). Each delivery is signed:
-`X-Portal-Signature: hex(HMAC_SHA256(endpoint_secret, body))`.
-
-JSON format:
-
-```json
-{
-  "event": "subscribed",
-  "product_id": 1,
-  "channel": "1-4-9~x7kq",
-  "referred_user": {"external_id": "mrd_8f2k1", "email": "founder@startup.in", "status": "subscribed"},
-  "commissions_earned": [{"user_id": 9, "amount": 288.0, "type": "subscription"}],
-  "is_direct": true
-}
-```
-
-`is_direct: false` means the event came from a descendant's link and the
-amounts are network overrides.
-
-## Commission cascade (company cost is constant)
-
-For every paid event the company owes exactly the base amount; the network
-splits it:
-
-- Converting affiliate keeps **80%**, passes 20% up.
-- Each ancestor keeps **80% of what arrives**, passes 20% further up.
-- The network root keeps the remainder.
-
-| Converter | Base ₹100 split | Base ₹360 (20% of ₹1800 sub) |
-|---|---|---|
-| Root A | A: 100 | A: 360 |
-| A → B | B: 80, A: 20 | B: 288, A: 72 |
-| A → B → C | C: 80, B: 16, A: 4 | C: 288, B: 57.6, A: 14.4 |

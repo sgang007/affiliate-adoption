@@ -1,84 +1,83 @@
-"""Monthly payout billing.
+"""Ledger and payout requests.
 
-Affiliates generate a bill (invoice) for a month, submit it to the company,
-and in each payout cycle the admin marks all submitted invoices as paid.
+Commissions accumulate as pending ledger entries. An affiliate requests a
+payout by submitting bank details; that freezes their pending balance into a
+PayoutRequest (pending → requested). The admin approves it, pays manually,
+and marks it paid — which emails the affiliate.
 """
 from datetime import datetime
 from decimal import Decimal
 
 from sqlalchemy.orm import Session
 
-from ..models import Commission, Invoice, User
+from ..models import Commission, PayoutRequest, User
 
 
-def generate_invoice(db: Session, user: User, period: str) -> Invoice:
-    invoice = (
-        db.query(Invoice).filter(Invoice.user_id == user.id, Invoice.period == period).first()
-    )
-    if invoice and invoice.status != "draft":
-        raise ValueError(f"Invoice for {period} is already {invoice.status}")
-
-    pending = (
-        db.query(Commission)
-        .filter(
-            Commission.user_id == user.id,
-            Commission.period == period,
-            Commission.status == "pending",
-        )
-        .all()
-    )
-    if not invoice and not pending:
-        raise LookupError(f"No pending commissions for {period}")
-
-    if not invoice:
-        invoice = Invoice(
-            number=f"INV-{period}-{user.id:05d}",
-            user_id=user.id,
-            period=period,
-        )
-        db.add(invoice)
-        db.flush()
-
-    for c in pending:
-        c.status = "invoiced"
-        c.invoice_id = invoice.id
-    db.flush()
+def pending_balance(db: Session, user: User) -> Decimal:
+    from sqlalchemy import func
 
     total = (
+        db.query(func.coalesce(func.sum(Commission.amount), 0))
+        .filter(Commission.user_id == user.id, Commission.status == "pending")
+        .scalar()
+    )
+    return Decimal(total or 0)
+
+
+def create_payout_request(db: Session, user: User, bank_details: dict) -> PayoutRequest:
+    pending = (
         db.query(Commission)
-        .filter(Commission.invoice_id == invoice.id)
-        .with_entities(Commission.amount)
+        .filter(Commission.user_id == user.id, Commission.status == "pending")
         .all()
     )
-    invoice.total_amount = sum((t[0] for t in total), Decimal(0))
+    amount = sum((Decimal(c.amount) for c in pending), Decimal(0))
+    if amount <= 0:
+        raise LookupError("No pending earnings to pay out")
+    if not any(bank_details.get(k) for k in ("upi", "bank_account")):
+        raise ValueError("Provide a UPI id or bank account for the payout")
+
+    req = PayoutRequest(
+        number=f"PAYOUT-{datetime.utcnow().strftime('%Y%m%d')}-{user.id:05d}-{len(pending):03d}",
+        user_id=user.id,
+        amount=amount,
+        bank_details=bank_details,
+    )
+    db.add(req)
+    db.flush()
+    for c in pending:
+        c.status = "requested"
+        c.payout_request_id = req.id
+    # Remember the details for next time.
+    user.payout_details = bank_details
     db.commit()
-    db.refresh(invoice)
-    return invoice
+    db.refresh(req)
+    return req
 
 
-def submit_invoice(db: Session, user: User, invoice_id: int) -> Invoice:
-    invoice = db.get(Invoice, invoice_id)
-    if not invoice or invoice.user_id != user.id:
-        raise LookupError("Invoice not found")
-    if invoice.status != "draft":
-        raise ValueError(f"Invoice already {invoice.status}")
-    invoice.status = "submitted"
-    invoice.submitted_at = datetime.utcnow()
+def approve_payout(db: Session, request_id: int) -> PayoutRequest:
+    req = db.get(PayoutRequest, request_id)
+    if not req:
+        raise LookupError("Payout request not found")
+    if req.status != "requested":
+        raise ValueError(f"Request is already {req.status}")
+    req.status = "approved"
+    req.approved_at = datetime.utcnow()
     db.commit()
-    db.refresh(invoice)
-    return invoice
+    db.refresh(req)
+    return req
 
 
-def close_payout_cycle(db: Session) -> dict:
-    """Admin action: pay out every submitted invoice in one cycle."""
-    submitted = db.query(Invoice).filter(Invoice.status == "submitted").all()
-    total = Decimal(0)
-    for inv in submitted:
-        inv.status = "paid"
-        inv.paid_at = datetime.utcnow()
-        total += Decimal(inv.total_amount or 0)
-        db.query(Commission).filter(Commission.invoice_id == inv.id).update(
-            {Commission.status: "paid"}
-        )
+def mark_payout_paid(db: Session, request_id: int) -> PayoutRequest:
+    req = db.get(PayoutRequest, request_id)
+    if not req:
+        raise LookupError("Payout request not found")
+    if req.status not in ("requested", "approved"):
+        raise ValueError(f"Request is already {req.status}")
+    req.status = "paid"
+    req.paid_at = datetime.utcnow()
+    db.query(Commission).filter(Commission.payout_request_id == req.id).update(
+        {Commission.status: "paid"}
+    )
     db.commit()
-    return {"invoices_paid": len(submitted), "total_paid": float(total)}
+    db.refresh(req)
+    return req

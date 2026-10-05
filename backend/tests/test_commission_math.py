@@ -1,15 +1,15 @@
 from decimal import Decimal
 
-from app.services.commission import KEEP_SHARE, q2
+from app.services.commission import q2
 
 
-def cascade(base: Decimal, depth: int) -> list[Decimal]:
-    """Mirror of the engine's pool-splitting logic for an N-deep chain."""
+def topdown(base: Decimal, pct: Decimal, branch_len: int) -> list[Decimal]:
+    """Mirror of the engine's top-down split for a branch below the admin."""
     pool = q2(base)
     shares = []
-    for i in range(depth):
-        is_last = i == depth - 1
-        share = pool if is_last else q2(pool * KEEP_SHARE)
+    for i in range(branch_len):
+        is_converter = i == branch_len - 1
+        share = pool if is_converter else q2(pool * pct / 100)
         shares.append(share)
         pool = q2(pool - share)
         if pool <= 0:
@@ -17,24 +17,35 @@ def cascade(base: Decimal, depth: int) -> list[Decimal]:
     return shares
 
 
-def test_root_alone_gets_full_base():
-    assert cascade(Decimal(100), 1) == [Decimal("100.00")]
+def test_direct_child_of_admin_keeps_everything():
+    assert topdown(Decimal(300), Decimal(20), 1) == [Decimal("300.00")]
 
 
-def test_two_levels_match_spec_example():
-    # Sub-affiliate 80, parent 20 — exactly the spec's Rs 100 example.
-    assert cascade(Decimal(100), 2) == [Decimal("80.00"), Decimal("20.00")]
-    # Subscription example: base 360 → 288 for the sub, 72 for the parent.
-    assert cascade(Decimal(360), 2) == [Decimal("288.00"), Decimal("72.00")]
+def test_spec_example_three_levels():
+    # A(admin) → B → C → D, D converts flat 300 at 20% network commission:
+    # B: 60, C: 48, D keeps 192.
+    assert topdown(Decimal(300), Decimal(20), 3) == [
+        Decimal("60.00"),
+        Decimal("48.00"),
+        Decimal("192.00"),
+    ]
 
 
-def test_three_levels_total_never_exceeds_base():
-    shares = cascade(Decimal(300), 3)
-    assert shares == [Decimal("240.00"), Decimal("48.00"), Decimal("12.00")]
-    assert sum(shares) == Decimal("300.00")
+def test_two_levels():
+    # B takes 20% of 100 = 20, converter C keeps 80.
+    assert topdown(Decimal(100), Decimal(20), 2) == [Decimal("20.00"), Decimal("80.00")]
 
 
-def test_deep_chain_company_cost_constant():
+def test_company_cost_constant_at_any_depth():
     for depth in range(1, 10):
-        shares = cascade(Decimal(1000), depth)
+        shares = topdown(Decimal(1000), Decimal(20), depth)
         assert sum(shares) == Decimal("1000.00")
+
+
+def test_custom_network_pct():
+    # 10% network commission, depth 3: B 30, C 27, D 243.
+    assert topdown(Decimal(300), Decimal(10), 3) == [
+        Decimal("30.00"),
+        Decimal("27.00"),
+        Decimal("243.00"),
+    ]

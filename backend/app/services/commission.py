@@ -1,21 +1,18 @@
-"""Multi-level commission engine.
+"""Incentive-rule engine and top-down network distribution.
 
-Rates (per product, admin-configurable, defaults per spec):
-  visited           → Rs 0
-  signed_up         → Rs 100
-  trial_started     → Rs 300
-  subscribed        → 20% of subscription amount, recurring monthly for the
-                      lifetime of the subscription (renewal events).
+Payables are computed from admin-configured IncentiveRules per event:
+  flat        → fixed amount
+  commission  → value% of a payload field (dot path, e.g. "params.subscription")
 
-Network cascade — company cost is constant (= base amount) no matter how
-deep the network is:
-  * The converting affiliate keeps 80% of the pool and passes 20% up to the
-    affiliate who recruited them.
-  * Each ancestor keeps 80% of what arrives and passes 20% further up.
-  * The root affiliate keeps whatever reaches them.
+Distribution ("network commission", per product, default 20%):
+  * Admins earn nothing; they are the network root.
+  * Walk the branch TOP-DOWN from the admin's direct child toward the
+    converting affiliate. Every intermediate ancestor takes
+    network_commission_pct of the running pool; the converter keeps the rest.
+  * Company cost is always exactly the computed payable.
 
-Example (base Rs 100):  A alone → A:100.  A→B converts → B:80, A:20.
-A→B→C converts → C:80, B:16, A:4. Totals always equal the base.
+Example — A(admin) → B → C → D, D converts, flat ₹300, 20% network:
+  B: 20% × 300 = 60 · C: 20% × 240 = 48 · D: remainder = 192.  Total 300.
 """
 from datetime import datetime
 from decimal import ROUND_HALF_UP, Decimal
@@ -27,35 +24,42 @@ from ..models import (
     AffiliateLink,
     Commission,
     Event,
+    IncentiveRule,
     Product,
     ReferredUser,
     User,
 )
 
-KEEP_SHARE = Decimal("0.80")
 TWO_PLACES = Decimal("0.01")
 
-# Meridian event → referred-user status
-EVENT_STATUS = {
+# Tolerant inbound-event normalization → canonical event kind
+EVENT_ALIASES = {
     "visited": "visited",
+    "visit": "visited",
     "signed_up": "signed_up",
+    "signed up": "signed_up",
+    "signup": "signed_up",
+    "trial": "trial",
     "trial_started": "trial",
     "subscribed": "subscribed",
     "subscription_renewed": "subscribed",
-    "subscription_cancelled": "churned",
+    "cancelled": "cancelled",
+    "subscription_cancelled": "cancelled",
 }
 
-# Meridian event → commission type (None = no payout)
-EVENT_COMMISSION = {
-    "visited": None,
-    "signed_up": "signup",
-    "trial_started": "trial",
-    "subscribed": "subscription",
-    "subscription_renewed": "subscription_renewal",
-    "subscription_cancelled": None,
+STATUS_FOR = {
+    "visited": "visited",
+    "signed_up": "signed_up",
+    "trial": "trial",
+    "subscribed": "subscribed",
+    "cancelled": "churned",
 }
 
-ONE_TIME_TYPES = {"signup", "trial", "subscription"}
+# Paid at most once per referred user, ever.
+ONE_TIME_EVENTS = {"signed_up", "trial"}
+# Paid at most once per referred user per month → recurring income while the
+# product keeps sending the event (stops on cancellation).
+MONTHLY_EVENTS = {"subscribed"}
 
 
 def q2(x: Decimal) -> Decimal:
@@ -66,52 +70,77 @@ def current_period(dt: datetime | None = None) -> str:
     return (dt or datetime.utcnow()).strftime("%Y-%m")
 
 
-def base_amount(event_type: str, product: Product, amount) -> Decimal:
-    ctype = EVENT_COMMISSION.get(event_type)
-    if ctype == "signup":
-        return Decimal(product.signup_commission or 0)
-    if ctype == "trial":
-        return Decimal(product.trial_commission or 0)
-    if ctype in ("subscription", "subscription_renewal"):
-        sub = Decimal(str(amount)) if amount else Decimal(product.price or 0)
-        return q2(sub * Decimal(product.subscription_pct or 0) / Decimal(100))
-    return Decimal(0)
+def resolve_field(payload: dict, path: str):
+    """Walk a dot path ("params.subscription") into the message payload."""
+    node = payload
+    for part in (path or "").split("."):
+        if not isinstance(node, dict) or part not in node:
+            return None
+        node = node[part]
+    return node
 
 
-def ancestor_chain(db: Session, user: User) -> list[User]:
-    """Users from the converting affiliate up to the network root."""
-    ids = user.path_ids or [user.id]
+def compute_payable(db: Session, product: Product, event: str, payload: dict) -> Decimal:
+    rule = (
+        db.query(IncentiveRule)
+        .filter(
+            IncentiveRule.product_id == product.id,
+            IncentiveRule.event == event,
+            IncentiveRule.is_active.is_(True),
+        )
+        .first()
+    )
+    if not rule or rule.value is None:
+        return Decimal(0)
+    if rule.type == "flat":
+        return q2(Decimal(rule.value))
+    basis = resolve_field(payload, rule.field or "params.subscription")
+    if basis is None:
+        basis = product.price or 0
+    try:
+        basis_dec = Decimal(str(basis))
+    except Exception:
+        return Decimal(0)
+    return q2(basis_dec * Decimal(rule.value) / Decimal(100))
+
+
+def branch_below_admin(db: Session, converter: User) -> list[User]:
+    """Users on the root→converter path, excluding admins, ordered top-down."""
+    ids = converter.path_ids or [converter.id]
     found = {u.id: u for u in db.query(User).filter(User.id.in_(ids)).all()}
-    return [found[i] for i in reversed(ids) if i in found]
+    return [found[i] for i in ids if i in found and found[i].role != "admin"]
 
 
 def distribute(
     db: Session,
-    base: Decimal,
-    converting_user: User,
+    payable: Decimal,
+    converter: User,
+    product: Product,
     *,
-    product_id: int,
     event_id: int | None,
     referred_user_id: int | None,
-    commission_type: str,
+    event_type: str,
     period: str,
 ) -> list[Commission]:
-    chain = ancestor_chain(db, converting_user)
-    pool = q2(base)
+    chain = branch_below_admin(db, converter)
+    if not chain or payable <= 0:
+        return []
+    pct = Decimal(product.network_commission_pct or 0) / Decimal(100)
+    pool = q2(payable)
     out: list[Commission] = []
     for i, earner in enumerate(chain):
-        is_last = i == len(chain) - 1
-        share = pool if is_last else q2(pool * KEEP_SHARE)
+        is_converter = i == len(chain) - 1
+        share = pool if is_converter else q2(pool * pct)
         if share <= 0:
-            break
+            continue
         out.append(
             Commission(
                 user_id=earner.id,
-                source_user_id=converting_user.id,
+                source_user_id=converter.id,
                 referred_user_id=referred_user_id,
-                product_id=product_id,
+                product_id=product.id,
                 event_id=event_id,
-                event_type=commission_type,
+                event_type=event_type,
                 amount=share,
                 period=period,
             )
@@ -123,21 +152,19 @@ def distribute(
     return out
 
 
-def process_meridian_event(
+def process_product_event(
     db: Session,
     product: Product,
-    event_type: str,
     channel: str,
-    external_id: str,
-    email: str | None = None,
-    amount=None,
-    raw: dict | None = None,
+    event_raw: str,
+    payload: dict,
 ) -> dict:
-    """Ingest one webhook event from Meridian's product intelligence engine:
-    update the referred user's funnel status, record the event, and create
-    the commission cascade."""
-    if event_type not in EVENT_STATUS:
-        raise ValueError(f"Unknown event type '{event_type}'")
+    """Ingest one webhook message {channel, event, params} from the product:
+    update the referred user's funnel status, record the event, compute the
+    payable from the incentive rules, and distribute it down the branch."""
+    event = EVENT_ALIASES.get((event_raw or "").lower().strip())
+    if not event:
+        raise ValueError(f"Unknown event type '{event_raw}'")
 
     link = (
         db.query(AffiliateLink)
@@ -145,80 +172,70 @@ def process_meridian_event(
         .first()
     )
     if not link:
-        raise LookupError(f"No affiliate link for channel '{channel}' on this product")
+        raise LookupError(f"No affiliate with channel '{channel}' on this product")
+
+    params = payload.get("params") or {}
+    external_id = str(payload.get("user_id") or params.get("email") or f"anon-{channel}")
 
     referred = (
         db.query(ReferredUser)
-        .filter(ReferredUser.link_id == link.id, ReferredUser.external_id == str(external_id))
+        .filter(ReferredUser.link_id == link.id, ReferredUser.external_id == external_id)
         .first()
     )
     if not referred:
-        referred = ReferredUser(link_id=link.id, external_id=str(external_id), email=email)
+        referred = ReferredUser(link_id=link.id, external_id=external_id)
         db.add(referred)
         db.flush()
-    if email and not referred.email:
-        referred.email = email
+    if params.get("email"):
+        referred.email = params["email"]
+    if params:
+        referred.meta = {**(referred.meta or {}), **params}
 
-    new_status = EVENT_STATUS[event_type]
+    new_status = STATUS_FOR[event]
     if (
         new_status == "churned"
         or REFERRAL_STATUS_ORDER[new_status] > REFERRAL_STATUS_ORDER.get(referred.status, 0)
     ):
         referred.status = new_status
-    if event_type in ("subscribed", "subscription_renewed") and amount:
-        referred.subscription_amount = Decimal(str(amount))
+    if event == "subscribed" and params.get("subscription"):
+        try:
+            referred.subscription_amount = Decimal(str(params["subscription"]))
+        except Exception:
+            pass
 
-    if event_type == "visited":
+    if event == "visited":
         link.visits = (link.visits or 0) + 1
 
-    event = Event(link_id=link.id, referred_user_id=referred.id, type=event_type, payload=raw or {})
-    db.add(event)
+    db_event = Event(link_id=link.id, referred_user_id=referred.id, type=event, payload=payload)
+    db.add(db_event)
     db.flush()
 
     commissions: list[Commission] = []
-    ctype = EVENT_COMMISSION[event_type]
-    if ctype:
-        period = current_period()
-        duplicate = False
-        if ctype in ONE_TIME_TYPES:
-            duplicate = (
-                db.query(Commission)
-                .filter(
-                    Commission.referred_user_id == referred.id,
-                    Commission.event_type == ctype,
-                )
-                .first()
-                is not None
-            )
-        elif ctype == "subscription_renewal":
-            # One subscription payout per referred user per month, whether it
-            # came from the initial "subscribed" event or an earlier renewal.
-            duplicate = (
-                db.query(Commission)
-                .filter(
-                    Commission.referred_user_id == referred.id,
-                    Commission.event_type.in_(["subscription", "subscription_renewal"]),
-                    Commission.period == period,
-                )
-                .first()
-                is not None
-            )
-        base = base_amount(event_type, product, amount)
-        if base > 0 and not duplicate:
+    period = current_period()
+    if event in ONE_TIME_EVENTS or event in MONTHLY_EVENTS:
+        dupe_q = db.query(Commission).filter(
+            Commission.referred_user_id == referred.id,
+            Commission.event_type == event,
+        )
+        if event in MONTHLY_EVENTS:
+            dupe_q = dupe_q.filter(Commission.period == period)
+        if dupe_q.first() is None:
+            payable = compute_payable(db, product, event, payload)
             commissions = distribute(
                 db,
-                base,
+                payable,
                 link.user,
-                product_id=product.id,
-                event_id=event.id,
+                product,
+                event_id=db_event.id,
                 referred_user_id=referred.id,
-                commission_type=ctype,
+                event_type=event,
                 period=period,
             )
 
     db.commit()
     return {
-        "event_id": event.id,
+        "event": event,
+        "event_id": db_event.id,
         "link_id": link.id,
         "referred_user_id": referred.id,
         "status": referred.status,

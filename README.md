@@ -16,25 +16,24 @@ Functions** (API) + **Azure Static Web Apps** (frontend).
 
 | Capability | Where |
 |---|---|
-| Admin creates products (name, description, URL, pricing, commission rates) | Admin console → Products |
-| Admin creates the first (root) affiliate users & assigns products | Admin console → Users |
-| Affiliates log in, see assigned products, generate unique referral links | Dashboard |
-| `?channel=<slug>` attribution — cookied on visit, carried through the funnel | `/r/<slug>` redirect + Meridian cookie |
-| Slug encodes the affiliate id **and all parents** (`1-4-9~x7kq`) | `backend/app/services/slugs.py` |
-| Webhook events from Meridian: visited / signed_up / trial_started / subscribed / renewed | `POST /api/webhooks/meridian/{product_id}` (HMAC-signed) |
-| Per-event outbound callbacks to each affiliate's own URL, JSON or form format | Webhooks page |
-| Commissions: ₹0 visit · ₹100 signup · ₹300 trial · 20% of subscription, recurring | `backend/app/services/commission.py` |
-| Recursive network: sub-affiliate keeps 80%, 20% cascades up — company cost constant | same |
+| Admin creates products (URL, pricing, **network commission %**) and is auto-added as the network root | Admin console → Products |
+| **Incentive rules** per event: flat ₹ or % of any payload field (`params.subscription`) | Admin console → ⚖ Incentive rules |
+| **Event message templates** (visited/signed_up/trial/subscribed params), admin-editable | Admin console → ✉ Event messages |
+| **Integration prompt generator**: one copy-paste doc with channel caching, `referrer_id` column, formats & secret | Admin console → ⚡ Integration prompt |
+| Affiliate identity: hex hash of email = the `?channel=` id on every link | `backend/app/services/identity.py` |
+| Webhook ingestion `{channel, event, params}`, HMAC-signed, idempotent | `POST /api/webhooks/meridian/{product_id}` |
+| Admin-only outbound callbacks (JSON/form, signed) to external systems | `/api/webhook-settings` (admin) |
+| Top-down distribution: admin earns ₹0; each level takes network % of the pool, converter keeps the rest | `backend/app/services/commission.py` |
 | Referred-user dashboard with statuses and per-user earnings | Product page |
 | Network graph + leaderboard: what every descendant earns *you* | Network page |
-| Affiliates invite sub-affiliates by email (signup link) | My Team page |
-| Monthly bill generation → submit → admin runs payout cycle → all paid | Payouts + Admin console |
+| Admin and affiliates invite sub-affiliates by email (signup link) | My Team page |
+| **Ledger + payout requests**: request with UPI/bank → admin approves → marks paid → email sent | Payouts + Admin console |
 | Gamification: XP, ranks (Spark → Legend), funnel bars, progress | Dashboard |
 
-Commission cascade example (base ₹100, chain A → B → C):
-C converts → **C ₹80, B ₹16, A ₹4** (sums to the base — the company never
-pays more than the single-affiliate cost). Full math and webhook contract:
-[docs/MERIDIAN_INTEGRATION.md](docs/MERIDIAN_INTEGRATION.md).
+Distribution example (flat ₹300 rule, 20% network commission, chain
+A admin → B → C → D, D's link converts): **B ₹60 · C ₹48 · D ₹192** — sums
+to the payable, the company never pays more, and the admin earns nothing.
+Full contract: [docs/MERIDIAN_INTEGRATION.md](docs/MERIDIAN_INTEGRATION.md).
 
 ---
 

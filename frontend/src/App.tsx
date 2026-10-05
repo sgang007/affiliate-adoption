@@ -8,7 +8,6 @@ import Login from './pages/Login'
 import Network from './pages/Network'
 import Payouts from './pages/Payouts'
 import ProductDetail from './pages/ProductDetail'
-import Settings from './pages/Settings'
 import Team from './pages/Team'
 
 function Private({ children }: { children: ReactNode }) {
@@ -31,7 +30,6 @@ export default function App() {
         <Route path="/network" element={<Private><Network /></Private>} />
         <Route path="/team" element={<Private><Team /></Private>} />
         <Route path="/payouts" element={<Private><Payouts /></Private>} />
-        <Route path="/settings" element={<Private><Settings /></Private>} />
         <Route path="/admin" element={<AdminOnly><Admin /></AdminOnly>} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

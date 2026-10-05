@@ -17,14 +17,13 @@ from ..models import AffiliateLink, ReferredUser, WebhookEndpoint
 
 log = logging.getLogger("portal.webhooks")
 
-# Outbound event names exposed to affiliates
+# Events arrive here already normalized by the commission engine.
 EVENT_NAME = {
     "visited": "visited",
     "signed_up": "signed_up",
-    "trial_started": "trial",
+    "trial": "trial",
     "subscribed": "subscribed",
-    "subscription_renewed": "subscribed",
-    "subscription_cancelled": "churned",
+    "cancelled": "churned",
 }
 
 

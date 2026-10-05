@@ -4,8 +4,9 @@ from sqlalchemy.orm import Session
 from ..database import get_db
 from ..deps import get_current_user
 from ..models import Invite, ProductAssignment, User
-from ..schemas import AcceptInviteIn, LoginIn, PayoutDetailsIn
+from ..schemas import AcceptInviteIn, LoginIn
 from ..security import create_access_token, hash_password, verify_password
+from ..services.identity import assign_affiliate_id
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -16,6 +17,7 @@ def user_out(user: User) -> dict:
         "email": user.email,
         "name": user.name,
         "role": user.role,
+        "affiliate_id": user.affiliate_id,
         "parent_id": user.parent_id,
         "depth": user.depth,
         "payout_details": user.payout_details or {},
@@ -34,17 +36,6 @@ def login(body: LoginIn, db: Session = Depends(get_db)):
 
 @router.get("/me")
 def me(user: User = Depends(get_current_user)):
-    return user_out(user)
-
-
-@router.put("/me/payout-details")
-def update_payout_details(
-    body: PayoutDetailsIn,
-    user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    user.payout_details = {k: v for k, v in body.model_dump().items() if v}
-    db.commit()
     return user_out(user)
 
 
@@ -74,6 +65,7 @@ def accept_invite(body: AcceptInviteIn, db: Session = Depends(get_db)):
         hashed_password=hash_password(body.password),
         role="affiliate",
         parent_id=parent.id,
+        affiliate_id=assign_affiliate_id(db, email),
     )
     db.add(user)
     db.flush()

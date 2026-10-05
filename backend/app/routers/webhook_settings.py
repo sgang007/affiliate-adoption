@@ -2,11 +2,17 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from ..database import get_db
-from ..deps import get_current_user
+from ..deps import get_current_user, require_admin
 from ..models import User, WebhookEndpoint
 from ..schemas import WebhookSettingIn, WebhookSettingUpdate
 
-router = APIRouter(prefix="/api/webhook-settings", tags=["webhook-settings"])
+# Outbound callback configuration is part of the admin's product-setup
+# workflow; affiliates never see or manage webhooks.
+router = APIRouter(
+    prefix="/api/webhook-settings",
+    tags=["webhook-settings"],
+    dependencies=[Depends(require_admin)],
+)
 
 VALID_EVENTS = {"all", "visited", "signed_up", "trial", "subscribed"}
 VALID_FORMATS = {"json", "form"}

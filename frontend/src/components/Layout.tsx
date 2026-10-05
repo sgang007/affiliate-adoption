@@ -7,7 +7,6 @@ const nav = [
   { to: '/network', label: 'Network', icon: '🕸' },
   { to: '/team', label: 'My Team', icon: '🤝' },
   { to: '/payouts', label: 'Payouts', icon: '💸' },
-  { to: '/settings', label: 'Webhooks', icon: '⚙' },
 ]
 
 export default function Layout({ children, title }: { children: ReactNode; title: string }) {
